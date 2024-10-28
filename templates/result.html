@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Результат классификации{% endblock %}
+
+{% block content %}
+<a href="/" class="nav-link">← Назад на главную</a>
+<h1>Результат классификации для "{{ mineral_name }}"</h1>
+<div class="result-container">
+    <table class="result-table">
+        <tr>
+            <th>Параметр</th>
+            <th>Значение</th>
+        </tr>
+        <tr>
+            <td>Группа недр</td>
+            <td>{{ result.pi_group_is_nedra }}</td>
+        </tr>
+        <tr>
+            <td>Название ГБЗ/ТБЗ</td>
+            <td>{{ result.pi_name_gbz_tbz }}</td>
+        </tr>
+        <tr>
+            <td>Нормализованное название</td>
+            <td>{{ result.normalized_name_for_display }}</td>
+        </tr>
+        <tr>
+            <td>Единица измерения</td>
+            <td>{{ result.pi_measurement_unit }}</td>
+        </tr>
+        <tr>
+            <td>Альтернативная единица измерения</td>
+            <td>{{ result.pi_measurement_unit_alternative }}</td>
+        </tr>
+    </table>
+</div>
+
+<style>
+    .result-container {
+        margin: 20px 0;
+        padding: 20px;
+        background-color: #f8f9fa;
+        border-radius: 5px;
+    }
+    .result-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .result-table th, .result-table td {
+        padding: 10px;
+        border: 1px solid #dee2e6;
+        text-align: left;
+    }
+    .result-table th {
+        background-color: #e9ecef;
+    }
+    .nav-link {
+        display: inline-block;
+        margin-bottom: 20px;
+        color: #007bff;
+        text-decoration: none;
+    }
+    .nav-link:hover {
+        text-decoration: underline;
+    }
+</style>
+{% endblock %}

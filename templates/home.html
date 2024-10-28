@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+
+{% block title %}Mineral Classifier{% endblock %}
+
+{% block content %}
+<h1>Mineral Classifier</h1>
+<div class="nav-links">
+    <a href="/upload">Загрузить Excel файл</a>
+    <a href="/docs">API Documentation</a>
+</div>
+
+<div class="card">
+    <h2>Классификация минерала</h2>
+    <form action="/classify_form" method="post" id="searchForm" class="search-form">
+        <div class="input-group">
+            <input type="text" 
+                   name="mineral_name" 
+                   placeholder="Введите название минерала" 
+                   required 
+                   class="form-control">
+            <button type="submit" class="button">Классифицировать</button>
+        </div>
+    </form>
+    <div id="result" class="result-card" style="display: none;">
+        <h3>Результат классификации</h3>
+        <table class="result-table">
+            <tbody id="resultTable"></tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card info-card">
+    <h2>Доступные функции</h2>
+    <ul>
+        <li>Классификация отдельных минералов через API</li>
+        <li>Пакетная обработка списка минералов</li>
+        <li>Обработка Excel файлов</li>
+    </ul>
+</div>
+
+<style>
+    .search-form {
+        width: 100%;
+        max-width: 100%;
+        padding: 0 15px;
+        box-sizing: border-box;
+    }
+
+    .input-group {
+        display: flex;
+        gap: 10px;
+        width: 100%;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .input-group .form-control {
+        flex: 1;
+        margin-bottom: 0;
+        min-width: 0; /* Предотвращает выход за границы */
+    }
+
+    .input-group .button {
+        flex-shrink: 0; /* Предотвращает сжатие кнопки */
+    }
+
+    .result-card {
+        margin-top: 20px;
+        max-height: 400px;
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: var(--secondary-color) #f0f0f0;
+        padding: 0 15px;
+    }
+
+    .result-card::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    .result-card::-webkit-scrollbar-track {
+        background: #f0f0f0;
+        border-radius: 4px;
+    }
+
+    .result-card::-webkit-scrollbar-thumb {
+        background-color: var(--secondary-color);
+        border-radius: 4px;
+    }
+
+    .result-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .result-table td {
+        padding: 8px 12px;
+        border-bottom: 1px solid #eee;
+    }
+
+    .result-table td:first-child {
+        font-weight: 500;
+        width: 40%;
+        color: var(--primary-color);
+    }
+
+    .info-card {
+        margin-top: 20px;
+    }
+
+    .info-card ul {
+        margin: 0;
+        padding-left: 20px;
+    }
+
+    .info-card li {
+        margin: 8px 0;
+    }
+
+    @media (max-height: 800px) {
+        .result-card {
+            max-height: 300px;
+        }
+    }
+
+    @media (max-height: 600px) {
+        .result-card {
+            max-height: 200px;
+        }
+    }
+
+    /* Адаптивность для маленьких экранов */
+    @media (max-width: 600px) {
+        .input-group {
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .input-group .button {
+            width: 100%;
+        }
+    }
+</style>
+
+<script>
+document.getElementById('searchForm').onsubmit = async function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const mineralName = formData.get('mineral_name');
+    
+    try {
+        const response = await fetch('/classify', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ mineral_name: mineralName })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Ошибка при получении данных');
+        }
+        
+        const data = await response.json();
+        
+        if (!data) {
+            throw new Error('Пустой ответ от сервера');
+        }
+        
+        // Создаем таблицу с результатами
+        const resultTable = document.getElementById('resultTable');
+        resultTable.innerHTML = `
+            <tr><td>Группа недр</td><td>${data.pi_group_is_nedra || 'не определено'}</td></tr>
+            <tr><td>Название ГБЗ/ТБЗ</td><td>${data.pi_name_gbz_tbz || 'не определено'}</td></tr>
+            <tr><td>Нормализованное название</td><td>${data.normalized_name_for_display || 'не определено'}</td></tr>
+            <tr><td>Единица измерения</td><td>${data.pi_measurement_unit || 'не определено'}</td></tr>
+            <tr><td>Альтернативная единица измерения</td><td>${data.pi_measurement_unit_alternative || 'не определено'}</td></tr>
+        `;
+        
+        document.getElementById('result').style.display = 'block';
+    } catch (error) {
+        console.error('Error:', error);
+        const resultTable = document.getElementById('resultTable');
+        resultTable.innerHTML = `
+            <tr><td colspan="2" class="error-message">
+                Произошла ошибка при классификации: ${error.message}
+            </td></tr>
+        `;
+        document.getElementById('result').style.display = 'block';
+    }
+};
+</script>
+{% endblock %}

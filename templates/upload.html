@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Excel File{% endblock %}
+
+{% block content %}
+<a href="/" class="nav-link">← Назад на главную</a>
+<h1>Загрузка Excel файла для классификации</h1>
+
+<div class="card">
+    <form action="/process_file" method="post" enctype="multipart/form-data" id="uploadForm">
+        <div class="file-upload">
+            <label for="fileInput" class="file-upload-label">
+                <span id="fileNameDisplay">Выберите Excel файл</span>
+                <input type="file" 
+                       id="fileInput" 
+                       name="file" 
+                       accept=".xlsx,.xls" 
+                       required 
+                       style="display: none;"
+                       onchange="handleFileSelect(this)">
+            </label>
+        </div>
+    </form>
+    <div id="progressContainer" style="display: none;">
+        <div class="progress-bar">
+            <div class="progress-fill"></div>
+        </div>
+        <div class="progress-info">
+            <span id="progressText">0%</span>
+            <span id="progressDetails">Обработано 0 из 0 записей</span>
+        </div>
+        <div id="loadingMessage" class="success-message">Обработка файла...</div>
+    </div>
+    <div id="errorMessage" class="error-message" style="display: none;"></div>
+</div>
+
+<div class="card">
+    <h2>Инструкция</h2>
+    <ol>
+        <li>Подготовьте Excel файл со списком минералов в первой колонке</li>
+        <li>Нажмите на кнопку выше и выберите подготовленный файл</li>
+        <li>Файл будет автоматически загружен и обработан</li>
+        <li>После обработки вы получите новый Excel файл с результатами классификации</li>
+    </ol>
+</div>
+
+<style>
+    .progress-info {
+        display: flex;
+        justify-content: space-between;
+        margin: 10px 0;
+        color: var(--primary-color);
+        font-size: 0.9rem;
+    }
+    
+    #progressText {
+        font-weight: bold;
+    }
+    
+    .progress-fill {
+        transition: width 0.3s ease;
+    }
+</style>
+
+<script>
+let processingId = null;
+let progressInterval = null;
+
+function updateProgress() {
+    if (!processingId) return;
+    
+    fetch(`/progress/${processingId}`)
+        .then(response => response.json())
+        .then(data => {
+            console.log('Progress data:', data); // Отладочный вывод
+            
+            if (data.total > 0) {
+                const percent = Math.round((data.processed / data.total) * 100);
+                document.querySelector('.progress-fill').style.width = `${percent}%`;
+                document.getElementById('progressText').textContent = `${percent}%`;
+                document.getElementById('progressDetails').textContent = 
+                    `Обработано ${data.processed} из ${data.total} записей`;
+                document.getElementById('loadingMessage').textContent = 
+                    `Обработка файла... ${percent}% завершено`;
+                
+                if (data.status === 'completed') {
+                    clearInterval(progressInterval);
+                    document.getElementById('loadingMessage').textContent = 'Обработка завершена!';
+                    // Добавляем небольшую задержку перед скачиванием
+                    setTimeout(() => {
+                        window.location.href = `/download/${processingId}`;
+                        document.getElementById('progressContainer').style.display = 'none';
+                    }, 1000);
+                } else if (data.status === 'error') {
+                    clearInterval(progressInterval);
+                    document.getElementById('errorMessage').style.display = 'block';
+                    document.getElementById('errorMessage').textContent = 'Произошла ошибка при обработке файла';
+                    document.getElementById('progressContainer').style.display = 'none';
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching progress:', error);
+            document.getElementById('errorMessage').style.display = 'block';
+            document.getElementById('errorMessage').textContent = 'Ошибка при получении прогресса обработки';
+        });
+}
+
+async function handleFileSelect(input) {
+    const fileName = input.files[0]?.name || 'Выберите Excel файл';
+    document.getElementById('fileNameDisplay').textContent = fileName;
+    
+    if (input.files[0]) {
+        // Сбрасываем предыдущий прогресс
+        document.querySelector('.progress-fill').style.width = '0%';
+        document.getElementById('progressText').textContent = '0%';
+        document.getElementById('progressDetails').textContent = 'Подготовка к обработке...';
+        document.getElementById('loadingMessage').textContent = 'Загрузка файла...';
+        document.getElementById('progressContainer').style.display = 'block';
+        document.getElementById('errorMessage').style.display = 'none';
+        
+        const formData = new FormData(document.getElementById('uploadForm'));
+        
+        try {
+            console.log('Sending file...'); // Отладочный вывод
+            const response = await fetch('/process_file', {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!response.ok) {
+                throw new Error('Ошибка при загрузке файла');
+            }
+            
+            const data = await response.json();
+            console.log('Received processing ID:', data); // Отладочный вывод
+            
+            processingId = data.processing_id;
+            
+            // Очищаем предыдущий интервал, если он существует
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
+            
+            // Запускаем обновление прогресса каждые 500мс
+            progressInterval = setInterval(updateProgress, 500);
+            
+        } catch (error) {
+            console.error('Upload error:', error);
+            document.getElementById('progressContainer').style.display = 'none';
+            document.getElementById('errorMessage').style.display = 'block';
+            document.getElementById('errorMessage').textContent = error.message;
+        }
+    }
+}
+
+// Очистка интервала при уходе со страницы
+window.onbeforeunload = function() {
+    if (progressInterval) {
+        clearInterval(progressInterval);
+    }
+};
+</script>
+{% endblock %}
