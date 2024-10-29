@@ -1,0 +1,71 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+.env
+.venv
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Project specific
+k8s/
+results/
+logs/
+*.log
+deployment_package/
+deployment_package.zip
+*.db
+*.sqlite3
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+
+# Scripts
+build_and_push.sh
+deploy.sh
+prepare_deployment.bat
+
+# Documentation
+README.md
+docs/
+*.md
+
+# Временные файлы
+*.tmp
+*.bak
+*.swp
+*~ 

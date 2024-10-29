@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 import asyncio
 import uuid
+from functools import lru_cache
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -32,7 +33,7 @@ results_dir.mkdir(exist_ok=True)
 # Создаем приложение FastAPI
 app = FastAPI(
     title="Mineral Classifier API",
-    description="API для классификации полезных ископаемых",
+    description="API для клссификации полезных ископаемых",
     version="1.0.0"
 )
 
@@ -43,7 +44,7 @@ def custom_openapi():
     openapi_schema = get_openapi(
         title="Mineral Classifier API",
         version="1.0.0",
-        description="API для классификации полезных ископаемых",
+        description="API для классификации олезных ископаемых",
         routes=app.routes,
     )
     app.openapi_schema = openapi_schema
@@ -71,14 +72,30 @@ templates_dir.mkdir(exist_ok=True)
 
 templates = Jinja2Templates(directory="templates")
 
-logging.debug("Initializing MineralClassifier")
-classifier = MineralClassifier('Справочник_для_редактирования_09.10.2024.xlsx')
-logging.debug("MineralClassifier initialized")
+# В начале файла добавим:
+# Изменим инициализацию классификатора
+classifier = None
+batch_processor = None
 
-# Инициализация BatchProcessor
-batch_processor = BatchProcessor(classifier)
 
-# Добавьте после инициализации FastAPI:
+@lru_cache(maxsize=1)
+def get_classifier():
+    global classifier, batch_processor
+    if classifier is None:
+        logging.debug("Initializing MineralClassifier")
+        classifier = MineralClassifier('Справочник_для_редактирования_09.10.2024.xlsx')
+        batch_processor = BatchProcessor(classifier)
+        logging.debug("MineralClassifier and BatchProcessor initialized")
+    return classifier
+
+
+def get_batch_processor():
+    if batch_processor is None:
+        get_classifier()  # Это инициализирует оба объекта
+    return batch_processor
+
+
+# Добавьте после инициализаци FastAPI:
 processing_tasks = {}
 
 
@@ -125,35 +142,31 @@ async def upload_form(request: Request):
 
 @app.post("/process_file", tags=["File Processing"])
 async def process_file(file: UploadFile = File(...)):
-    """
-    Обрабатывает загруженный Excel файл и возвращает результаты классификации
-    
-    - **file**: Excel файл со списком минералов в первой колонке
-    
-    Returns:
-        FileResponse: Обработанный Excel файл с результатами классификации
-    """
     try:
-        # Создаем временную директорию и сохраняем файл
+        # Добавляем таймаут для операции чтения файла
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file.filename)
 
-        with open(input_path, 'wb') as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        # Читаем файл с таймаутом
+        async with asyncio.timeout(30):  # 30 секунд таймаут
+            with open(input_path, 'wb') as buffer:
+                shutil.copyfileobj(file.file, buffer)
 
-        # Читаем количество строк в файле
         df = pd.read_excel(input_path, usecols=[0])
         total_rows = len(df)
 
-        # Создаем ID для отслеживания прогресса
         processing_id = str(uuid.uuid4())
         processing_tasks[processing_id] = ProcessingStatus(total_rows)
 
-        # Запускаем обработку в фоновом режиме
-        asyncio.create_task(process_file_background(processing_id, input_path, temp_dir))
+        # Запускаем с обработкой ошибок
+        task = asyncio.create_task(process_file_background(processing_id, input_path, temp_dir))
+        task.add_done_callback(lambda t: logging.error(f"Task failed: {t.exception()}") if t.exception() else None)
 
         return {"processing_id": processing_id}
 
+    except asyncio.TimeoutError:
+        logging.error("Timeout while processing file")
+        raise HTTPException(status_code=504, detail="Processing timeout")
     except Exception as e:
         logging.error(f"Error processing file: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -161,6 +174,7 @@ async def process_file(file: UploadFile = File(...)):
 
 async def process_file_background(processing_id: str, input_path: str, temp_dir: str):
     try:
+        classifier = get_classifier()
         timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
         output_filename = f"classified_{timestamp}_{os.path.basename(input_path)}"
         output_path = results_dir / output_filename
@@ -180,17 +194,19 @@ async def process_file_background(processing_id: str, input_path: str, temp_dir:
         all_results = []
         for i, mineral in enumerate(minerals):
             if pd.notna(mineral):
+                # Передаем управление каждые 5 операций
+                if i % 5 == 0:
+                    await asyncio.sleep(0.01)
+
                 result = classifier.classify_mineral(str(mineral))
                 result['original_name'] = mineral
                 all_results.append(result)
 
-            # Обновляем прогресс после каждой обработки
             processing_tasks[processing_id].processed = i + 1
 
-            # Логируем каждые 10 записей
+            # Логируем прогресс
             if (i + 1) % 10 == 0:
                 logging.debug(f"Processed {i + 1}/{total} minerals")
-                await asyncio.sleep(0)  # Даем возможность другим задачам выполниться
 
         # Сохраняем результаты
         df_results = pd.DataFrame(all_results)
@@ -248,12 +264,8 @@ async def download_result(processing_id: str):
 
 @app.post("/classify", tags=["Classification"])
 async def classify_mineral(request: MineralRequest):
-    """
-    Классифицирует отдельный минерал
-    
-    - **mineral_name**: Название минерала для классификации
-    """
     try:
+        classifier = get_classifier()
         logging.debug(f"Received request for mineral: {request.mineral_name}")
         result = classifier.classify_mineral(request.mineral_name)
         result = {k: str(v) for k, v in result.items()}
@@ -309,32 +321,85 @@ def cleanup_old_results(directory: Path, max_age_hours: int = 24):
         logging.error(f"Error during cleanup: {str(e)}")
 
 
+# Функция очистки старых задач
+async def cleanup_old_tasks():
+    while True:
+        try:
+            current_time = datetime.now()
+            to_remove = []
+
+            for task_id, task in processing_tasks.items():
+                if (task.status == 'completed' and
+                        hasattr(task, 'completion_time') and
+                        current_time - task.completion_time > timedelta(hours=1)):
+                    to_remove.append(task_id)
+
+            for task_id in to_remove:
+                del processing_tasks[task_id]
+
+            await asyncio.sleep(3600)  # Проверяем раз в час
+
+        except Exception as e:
+            logging.error(f"Error in cleanup_old_tasks: {e}")
+            await asyncio.sleep(60)
+
+
 @app.on_event("startup")
 async def startup_event():
     """Выполняется при запуске приложения"""
     cleanup_old_results(results_dir)
+    asyncio.create_task(cleanup_old_tasks())
+
+    # Инициализируем классификатор в отдельной задаче
+    def init_classifier():
+        return get_classifier()
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, init_classifier)
+
+
+@app.get("/health", tags=["Health"])
+async def health_check():
+    """
+    Проверка здоровья сервиса
+    """
+    try:
+        # Проверяем подключение к Redis
+        classifier = get_classifier()
+        classifier.db.redis_client.ping()
+        
+        return {
+            "status": "healthy",
+            "redis": "connected",
+            "classifier": "initialized"
+        }
+    except Exception as e:
+        logging.error(f"Health check failed: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Service unhealthy: {str(e)}"
+        )
 
 
 if __name__ == "__main__":
-    # Проверяем наличие всех необходимых файлов
-    required_files = [
-        Path("templates/base.html"),
-        Path("templates/home.html"),
-        Path("templates/upload.html"),
-        Path("Справочник_для_редактирования_09.10.2024.xlsx")
-    ]
+    try:
+        # Проверяем наличие всех необходимых файлов
+        required_files = [
+            Path("templates/base.html"),
+            Path("templates/home.html"),
+            Path("templates/upload.html"),
+            Path("Справочник_для_редактирования_09.10.2024.xlsx")
+        ]
 
-    for file in required_files:
-        if not file.exists():
-            logging.error(f"Required file not found: {file}")
-            raise FileNotFoundError(f"Required file not found: {file}")
+        for file in required_files:
+            if not file.exists():
+                logging.error(f"Required file not found: {file}")
+                raise FileNotFoundError(f"Required file not found: {file}")
 
-    # Добавляем прове��ку наличия всех шаблонов
-    for template in ["base.html", "home.html", "upload.html"]:
-        template_path = templates_dir / template
-        if not template_path.exists():
-            logging.error(f"Template file not found: {template}")
-            raise FileNotFoundError(f"Template file not found: {template}")
-        logging.debug(f"Template found: {template}")
-
-    uvicorn.run(app, host="127.0.0.1", port=8005)
+        # Изменяем хост на 0.0.0.0 для доступа из контейнера
+        config = uvicorn.Config(app, host="0.0.0.0", port=8001, timeout_keep_alive=30)
+        server = uvicorn.Server(config)
+        server.run()
+    except Exception as e:
+        logging.error(f"Failed to start server: {e}")
+        raise

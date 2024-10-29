@@ -1,142 +1,177 @@
 import pandas as pd
-import re
-import numpy as np
 import logging
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression, RidgeClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-from typing import Dict, Any
-from multiprocessing import Pool, Manager
-from functools import partial
-import tqdm  # Для отображения прогресса
-import os
+from typing import Dict, Any, List
+import redis
+from redis_manager import RedisManager
+from pathlib import Path
+from split_dictionary import DictionarySplitter
+import re
 
 logging.basicConfig(level=logging.DEBUG)
 
-class DataLoader:
-    @staticmethod
-    def load_excel(file_path: str, sheet_name: int = 0, header: int = 3, start_column: int = 2) -> pd.DataFrame:
-        logging.debug(f"Attempting to load data from {file_path}")
-        df = pd.read_excel(file_path, sheet_name=sheet_name, header=header)
-        df = df.iloc[:, start_column:]
-        logging.debug(f"Data loaded successfully. Shape: {df.shape}")
-        return df
-
-class DataPreprocessor:
-    @staticmethod
-    def clean_text(text: str) -> str:
-        text = text.lower()
-        text = re.sub(r'[^\w\s]', '', text)
-        text = re.sub(r'\s+', ' ', text)
-        return text
-
-    @staticmethod
-    def preprocess_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-        new_column_names = [
-            "pi_variants", "normalized_name_for_display", "pi_name_gbz_tbz",
-            "pi_group_is_nedra", "pi_measurement_unit", "pi_measurement_unit_alternative",
-        ]
-        df.columns = new_column_names
-        df.columns = [col.lower().replace(' ', '_') for col in df.columns]
-        df = df.dropna(subset=['pi_variants', 'normalized_name_for_display', 'pi_name_gbz_tbz', 'pi_group_is_nedra'])
-        df['pi_measurement_unit'] = df['pi_measurement_unit'].replace('-', '').fillna('')
-        df['pi_measurement_unit_alternative'] = df['pi_measurement_unit_alternative'].replace('-', '').fillna('')
-        df = df.drop_duplicates(subset=['pi_variants'], keep='first')
-        df['pi_variants'] = df['pi_variants'].apply(DataPreprocessor.clean_text)
-        return df
-
-class ModelTrainer:
-    @staticmethod
-    def train_model(X, y, model_class, **kwargs):
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        model = model_class(**kwargs)
-        model.fit(X_train, y_train)
-        accuracy = model.score(X_test, y_test)
-        return model, accuracy
-
 class MineralClassifier:
-    def __init__(self, file_path: str):
-        self.data_loader = DataLoader()
-        self.preprocessor = DataPreprocessor()
-        self.df = self.load_and_preprocess_data(file_path)
-        
-        # Оптимизация памяти - изменим эту часть
-        for col in self.df.columns:
-            if self.df[col].dtype == 'object':
-                # Сначала заполняем пустые значения
-                self.df[col] = self.df[col].fillna('')
-                # Затем преобразуем в категориальный тип
-                self.df[col] = self.df[col].astype('category')
-        
-        # Оптимизация векторизатора
-        self.vectorizer = TfidfVectorizer(
-            max_features=10000,  # Ограничиваем количество признаков
-            dtype=np.float32  # Используем float32 вместо float64
-        )
-        self.X = self.vectorizer.fit_transform(self.df['pi_variants'])
-        self.train_models()
-
-    def load_and_preprocess_data(self, file_path: str) -> pd.DataFrame:
-        df = self.data_loader.load_excel(file_path)
-        return self.preprocessor.preprocess_dataframe(df)
-
-    def train_models(self):
-        self.models = {}
-        self.label_encoders = {}
-
-        for column in ['pi_group_is_nedra', 'pi_name_gbz_tbz', 'normalized_name_for_display', 
-                      'pi_measurement_unit', 'pi_measurement_unit_alternative']:
-            le = LabelEncoder()
-            # Используем уже заполненные значения
-            y = le.fit_transform(self.df[column])
-            self.label_encoders[column] = le
-
-            if column in ['pi_group_is_nedra', 'pi_name_gbz_tbz']:
-                model, accuracy = ModelTrainer.train_model(self.X, y, RandomForestClassifier, random_state=42)
-            elif column == 'normalized_name_for_display':
-                model, accuracy = ModelTrainer.train_model(self.X, y, RidgeClassifier)
-            else:
-                model, accuracy = ModelTrainer.train_model(self.X, y, LogisticRegression)
-
-            self.models[column] = model
-            logging.debug(f"Accuracy for {column}: {accuracy}")
+    def __init__(self, file_path):
+        try:
+            self.db = RedisManager()
+            
+            # Проверяем наличие файлов словарей
+            dict_path = Path('data/dictionary.xlsx')
+            var_path = Path('data/variations.xlsx')
+            
+            if not dict_path.exists() or not var_path.exists():
+                # Если файлов нет, создаем их
+                splitter = DictionarySplitter(file_path)
+                splitter.process_file()
+                splitter.save_files()
+                
+            # Загружаем словари
+            self.db.load_dictionaries(
+                dictionary_path='data/dictionary.xlsx',
+                variations_path='data/variations.xlsx'
+            )
+            
+        except Exception as e:
+            logging.error(f"Error initializing classifier: {str(e)}")
+            raise
 
     def classify_mineral(self, mineral_name: str) -> Dict[str, Any]:
-        cleaned_name = self.preprocessor.clean_text(mineral_name)
-        vectorized_name = self.vectorizer.transform([cleaned_name])
+        try:
+            # Разбиваем входную строку на компоненты
+            components = self._split_input(mineral_name)
+            
+            # Ищем для каждого компонента
+            best_result = None
+            best_priority = -1
+            
+            for component in components:
+                result = self.db.get_mapping(component)
+                if result:
+                    # Проверяем приоритет контекста
+                    context_priority = self._get_context_priority(component)
+                    if context_priority > best_priority:
+                        best_result = result
+                        best_priority = context_priority
+            
+            if best_result:
+                return best_result
+            
+            # Если ничего не нашли
+            return {
+                'normalized_name_for_display': 'неизвестно',
+                'pi_name_gbz_tbz': 'неизвестно',
+                'pi_group_is_nedra': 'неизвестно',
+                'pi_measurement_unit': '',
+                'pi_measurement_unit_alternative': ''
+            }
+            
+        except Exception as e:
+            logging.error(f"Error in classify_mineral: {str(e)}")
+            raise
 
-        predictions = {}
-        probabilities = {}
-
-        for column, model in self.models.items():
-            le = self.label_encoders[column]
-            pred = le.inverse_transform(model.predict(vectorized_name))[0]
-            predictions[column] = pred if pred in self.df[column].unique() else "неизвестно"
-
-            if hasattr(model, 'predict_proba'):
-                probabilities[column] = model.predict_proba(vectorized_name)[0]
-            else:
-                probabilities[column] = model.decision_function(vectorized_name)[0]
-
-            logging.debug(f"Probabilities for {column}: {probabilities[column]}")
-
-        logging.debug(f"Final predictions: {predictions}")
-        return predictions
-
-    def check_classification(self, mineral_name: str):
-        result = self.classify_mineral(mineral_name)
-        print(f"\nРезультат классификации для '{mineral_name}':")
-        for key, value in result.items():
-            print(f"{key}: {value}")
+    def _get_context_priority(self, component: str) -> int:
+        """Возвращает приоритет для компонента на основе ключевых слов"""
+        keyword_weights = {
+            'силикат': 3,
+            'бетон': 2,
+            'строительный': 1,
+            'балласт': 1
+        }
         
-        mineral_data = self.df[self.df['pi_variants'].str.contains(mineral_name, case=False)]
-        if not mineral_data.empty:
-            print("\nДанные из исходного датасета:")
-            print(mineral_data)
-        else:
-            print(f"\nМинерал '{mineral_name}' не найден в исходном датасете.")
+        priority = 0
+        for keyword, weight in keyword_weights.items():
+            if keyword in component:
+                priority += weight
+        
+        return priority
+
+    def _split_input(self, text: str) -> List[str]:
+        """Разбиение входного текста на компоненты с сохранением контекста"""
+        components = []
+        text = text.lower().strip()
+        
+        # Добавляем полный текст
+        components.append(text)
+        
+        # Извлекаем основной термин (до скобок)
+        main_term = text.split('(')[0].strip()
+        if main_term and main_term != text:
+            components.append(main_term)
+        
+        # Извлекаем термины в скобках
+        bracket_terms = re.findall(r'\((.*?)\)', text)
+        for term in bracket_terms:
+            term = term.strip()
+            if term:
+                components.append(term)
+                # Разбиваем по запятым
+                for subterm in term.split(','):
+                    subterm = subterm.strip()
+                    if subterm and subterm not in components:
+                        components.append(subterm)
+        
+        return components
+
+    def load_data(self, file_path):
+        """Загрузка данных из Excel в Redis"""
+        try:
+            df = pd.read_excel(
+                file_path,
+                header=3,
+                usecols=[2,3,4,5,6,7]
+            )
+            
+            df.columns = [
+                "pi_variants", "normalized_name_for_display", "pi_name_gbz_tbz",
+                "pi_group_is_nedra", "pi_measurement_unit", "pi_measurement_unit_alternative"
+            ]
+            
+            # Заполняем пустые значения
+            df = df.fillna('')
+            
+            # Подготавливаем данные для Redis
+            mappings = []
+            for _, row in df.iterrows():
+                mapping = {
+                    'variant': str(row['pi_variants']),
+                    'normalized_name': str(row['normalized_name_for_display']),
+                    'gbz_name': str(row['pi_name_gbz_tbz']),
+                    'group_name': str(row['pi_group_is_nedra']),
+                    'measurement_unit': str(row['pi_measurement_unit']),
+                    'measurement_unit_alt': str(row['pi_measurement_unit_alternative'])
+                }
+                mappings.append(mapping)
+            
+            # Массовое добавление данных
+            self.db.bulk_add_mappings(mappings)
+            logging.debug(f"Loaded {len(mappings)} mappings into Redis")
+            
+        except Exception as e:
+            logging.error(f"Error loading data: {str(e)}")
+            raise
+
+    def analyze_unknown_term(self, term: str) -> Dict[str, Any]:
+        """Анализ неизвестного термина"""
+        analysis = self.splitter._analyze_term(term)
+        
+        if analysis['base_mineral']:
+            # Ищем похожие термины в известных связях
+            if analysis['base_mineral'] in self.splitter.term_relationships:
+                relationships = self.splitter.term_relationships[analysis['base_mineral']]
+                
+                # Находим наиболее подходящий контекст
+                best_match = max(relationships, 
+                               key=lambda x: len(set(x['context']) & set(analysis['context'])))
+                
+                if best_match['confidence'] > 0.5:
+                    return self.db.get_mapping(best_match['normalized_name'])
+        
+        return {
+            'normalized_name_for_display': 'неизвестно',
+            'pi_name_gbz_tbz': 'неизвестно',
+            'pi_group_is_nedra': 'неизвестно',
+            'pi_measurement_unit': '',
+            'pi_measurement_unit_alternative': ''
+        }
 
 class BatchProcessor:
     def __init__(self, classifier: MineralClassifier):
@@ -150,9 +185,9 @@ class BatchProcessor:
         result['original_name'] = mineral
         return result
 
-    def process_excel(self, input_file: str, output_file: str = None, chunk_size: int = 100) -> str:
+    def process_excel(self, input_file: str, output_file: str = None) -> str:
         """
-        Обрабатывает входной Excel файл последовательно.
+        Обрабатывает входной Excel файл.
         """
         try:
             logging.debug(f"Starting processing of file: {input_file}")
@@ -169,7 +204,7 @@ class BatchProcessor:
             total_minerals = len(minerals)
             logging.debug(f"Total minerals to process: {total_minerals}")
             
-            # Обрабатываем минералы последовательно
+            # Обрабатываем минералы
             all_results = []
             for i, mineral in enumerate(minerals, 1):
                 result = self._process_mineral(mineral)
@@ -204,7 +239,3 @@ class BatchProcessor:
         except Exception as e:
             logging.error(f"Error processing file: {str(e)}")
             raise
-
-if __name__ == "__main__":
-    classifier = MineralClassifier('Справочник_для_редактирования_09.10.2024.xlsx')
-    classifier.check_classification("авантюрин")

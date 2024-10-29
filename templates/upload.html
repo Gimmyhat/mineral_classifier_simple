@@ -45,9 +45,35 @@
 </div>
 
 <style>
+    .file-upload {
+        text-align: center; /* Центрируем содержимое */
+        margin: 20px 0;
+    }
+
+    .file-upload-label {
+        display: inline-block;
+        padding: 12px 24px;
+        background-color: var(--secondary-color);
+        color: white;
+        border-radius: var(--border-radius);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        text-align: center;
+        min-width: 200px;
+        margin: 0 auto; /* Центрируем сам элемент */
+    }
+
+    /* Добавляем стили для контейнера прогресса */
+    #progressContainer {
+        text-align: center;
+        max-width: 600px;
+        margin: 0 auto;
+    }
+
     .progress-info {
         display: flex;
-        justify-content: space-between;
+        justify-content: center; /* Центрируем информацию о прогрессе */
+        gap: 20px; /* Добавляем отступ между элементами */
         margin: 10px 0;
         color: var(--primary-color);
         font-size: 0.9rem;

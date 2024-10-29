@@ -1,7 +1,24 @@
-# Системные файлы и папки
-.idea/
+# Python
 __pycache__/
+*.py[cod]
+*.so
+.Python
+env/
+venv/
+.env
 
-# Файлы с результатами
+# Данные
+data/
 results/
+logs/
+
+# Временные файлы
+*.tmp
+*.bak
+deployment_package/
+deployment_package.zip
+
+# IDE
+.vscode/
+.idea/
 
