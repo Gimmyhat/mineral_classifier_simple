@@ -280,7 +280,7 @@ async def classify_mineral(request: MineralRequest):
 async def classify_batch(minerals: MineralBatchInput):
     """
     Классифицирует список минералов
-    
+
     - **minerals**: Список названий минералов для классификации
     """
     logging.debug(f"Received batch request for minerals: {minerals.minerals}")
@@ -367,7 +367,7 @@ async def health_check():
         # Проверяем подключение к Redis
         classifier = get_classifier()
         classifier.db.redis_client.ping()
-        
+
         return {
             "status": "healthy",
             "redis": "connected",

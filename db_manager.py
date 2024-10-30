@@ -2,6 +2,7 @@ import sqlite3
 from typing import Dict, List
 import logging
 
+
 class DatabaseManager:
     def __init__(self, db_path: str = "mineral_classifier.db"):
         self.db_path = db_path
@@ -21,7 +22,7 @@ class DatabaseManager:
                     measurement_unit_alt TEXT
                 )
             """)
-            
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS synonyms (
                     id INTEGER PRIMARY KEY,
@@ -29,13 +30,13 @@ class DatabaseManager:
                     base_form TEXT NOT NULL
                 )
             """)
-            
+
             # Индексы для быстрого поиска
             conn.execute("CREATE INDEX IF NOT EXISTS idx_variant ON mineral_mappings(variant)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_word ON synonyms(word)")
 
-    def add_mapping(self, variant: str, normalized_name: str, gbz_name: str, 
-                   group_name: str, unit: str, unit_alt: str):
+    def add_mapping(self, variant: str, normalized_name: str, gbz_name: str,
+                    group_name: str, unit: str, unit_alt: str):
         """Добавление нового маппинга"""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
@@ -61,7 +62,7 @@ class DatabaseManager:
                 WHERE variant = ?
             """, (variant.lower(),))
             result = cursor.fetchone()
-            
+
             if result:
                 return {
                     'normalized_name_for_display': result[0],

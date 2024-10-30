@@ -8,9 +8,9 @@ venv/
 .env
 
 # Данные
-# data/
-# results/
-# logs/
+data/
+results/
+logs/
 
 # Временные файлы
 *.tmp
@@ -21,4 +21,8 @@ deployment_package.zip
 # IDE
 .vscode/
 .idea/
+
+# Python cache
+temp/
+*.pyc
 

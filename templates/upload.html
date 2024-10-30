@@ -11,11 +11,11 @@
         <div class="file-upload">
             <label for="fileInput" class="file-upload-label">
                 <span id="fileNameDisplay">Выберите Excel файл</span>
-                <input type="file" 
-                       id="fileInput" 
-                       name="file" 
-                       accept=".xlsx,.xls" 
-                       required 
+                <input type="file"
+                       id="fileInput"
+                       name="file"
+                       accept=".xlsx,.xls"
+                       required
                        style="display: none;"
                        onchange="handleFileSelect(this)">
             </label>
@@ -78,11 +78,11 @@
         color: var(--primary-color);
         font-size: 0.9rem;
     }
-    
+
     #progressText {
         font-weight: bold;
     }
-    
+
     .progress-fill {
         transition: width 0.3s ease;
     }
@@ -94,21 +94,21 @@ let progressInterval = null;
 
 function updateProgress() {
     if (!processingId) return;
-    
+
     fetch(`/progress/${processingId}`)
         .then(response => response.json())
         .then(data => {
             console.log('Progress data:', data); // Отладочный вывод
-            
+
             if (data.total > 0) {
                 const percent = Math.round((data.processed / data.total) * 100);
                 document.querySelector('.progress-fill').style.width = `${percent}%`;
                 document.getElementById('progressText').textContent = `${percent}%`;
-                document.getElementById('progressDetails').textContent = 
+                document.getElementById('progressDetails').textContent =
                     `Обработано ${data.processed} из ${data.total} записей`;
-                document.getElementById('loadingMessage').textContent = 
+                document.getElementById('loadingMessage').textContent =
                     `Обработка файла... ${percent}% завершено`;
-                
+
                 if (data.status === 'completed') {
                     clearInterval(progressInterval);
                     document.getElementById('loadingMessage').textContent = 'Обработка завершена!';
@@ -135,7 +135,7 @@ function updateProgress() {
 async function handleFileSelect(input) {
     const fileName = input.files[0]?.name || 'Выберите Excel файл';
     document.getElementById('fileNameDisplay').textContent = fileName;
-    
+
     if (input.files[0]) {
         // Сбрасываем предыдущий прогресс
         document.querySelector('.progress-fill').style.width = '0%';
@@ -144,33 +144,33 @@ async function handleFileSelect(input) {
         document.getElementById('loadingMessage').textContent = 'Загрузка файла...';
         document.getElementById('progressContainer').style.display = 'block';
         document.getElementById('errorMessage').style.display = 'none';
-        
+
         const formData = new FormData(document.getElementById('uploadForm'));
-        
+
         try {
             console.log('Sending file...'); // Отладочный вывод
             const response = await fetch('/process_file', {
                 method: 'POST',
                 body: formData
             });
-            
+
             if (!response.ok) {
                 throw new Error('Ошибка при загрузке файла');
             }
-            
+
             const data = await response.json();
             console.log('Received processing ID:', data); // Отладочный вывод
-            
+
             processingId = data.processing_id;
-            
+
             // Очищаем предыдущий интервал, если он существует
             if (progressInterval) {
                 clearInterval(progressInterval);
             }
-            
+
             // Запускаем обновление прогресса каждые 500мс
             progressInterval = setInterval(updateProgress, 500);
-            
+
         } catch (error) {
             console.error('Upload error:', error);
             document.getElementById('progressContainer').style.display = 'none';

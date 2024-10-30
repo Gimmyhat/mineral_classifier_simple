@@ -13,10 +13,10 @@
     <h2>Классификация минерала</h2>
     <form action="/classify_form" method="post" id="searchForm" class="search-form">
         <div class="input-group">
-            <input type="text" 
-                   name="mineral_name" 
-                   placeholder="Введите название минерала" 
-                   required 
+            <input type="text"
+                   name="mineral_name"
+                   placeholder="Введите название минерала"
+                   required
                    class="form-control">
             <button type="submit" class="button">Классифицировать</button>
         </div>
@@ -174,10 +174,10 @@
 <script>
 document.getElementById('searchForm').onsubmit = async function(e) {
     e.preventDefault();
-    
+
     const formData = new FormData(this);
     const mineralName = formData.get('mineral_name');
-    
+
     try {
         const response = await fetch('/classify', {
             method: 'POST',
@@ -186,17 +186,17 @@ document.getElementById('searchForm').onsubmit = async function(e) {
             },
             body: JSON.stringify({ mineral_name: mineralName })
         });
-        
+
         if (!response.ok) {
             throw new Error('Ошибка при получении данных');
         }
-        
+
         const data = await response.json();
-        
+
         if (!data) {
             throw new Error('Пустой ответ от сервера');
         }
-        
+
         // Создаем таблицу с результатами
         const resultTable = document.getElementById('resultTable');
         resultTable.innerHTML = `
@@ -206,7 +206,7 @@ document.getElementById('searchForm').onsubmit = async function(e) {
             <tr><td>Единица измерения</td><td>${data.pi_measurement_unit || 'не определено'}</td></tr>
             <tr><td>Альтернативная единица измерения</td><td>${data.pi_measurement_unit_alternative || 'не определено'}</td></tr>
         `;
-        
+
         document.getElementById('result').style.display = 'block';
     } catch (error) {
         console.error('Error:', error);

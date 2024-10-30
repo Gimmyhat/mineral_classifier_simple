@@ -5,6 +5,7 @@ from typing import Dict, Optional, List
 from config import REDIS_CONFIG
 import pandas as pd
 
+
 class RedisManager:
     def __init__(self):
         self.redis_client = redis.Redis(**REDIS_CONFIG)
@@ -20,8 +21,8 @@ class RedisManager:
             logging.error(f"Failed to connect to Redis: {e}")
             raise
 
-    def add_mapping(self, variant: str, normalized_name: str, gbz_name: str, 
-                   group_name: str, unit: str, unit_alt: str):
+    def add_mapping(self, variant: str, normalized_name: str, gbz_name: str,
+                    group_name: str, unit: str, unit_alt: str):
         """Добавление нового маппинга"""
         mapping = {
             'normalized_name': normalized_name,
@@ -32,10 +33,10 @@ class RedisManager:
         }
         # Сохраняем маппинг
         self.redis_client.hset(
-            f"mapping:{variant.lower()}", 
+            f"mapping:{variant.lower()}",
             mapping=json.dumps(mapping)
         )
-        
+
         # Добавляем в индекс для поиска
         self.redis_client.sadd('variants', variant.lower())
 
@@ -47,7 +48,7 @@ class RedisManager:
         """Получение маппинга с учетом контекста"""
         try:
             variant = variant.lower().strip()
-            
+
             # Получаем уникальный ключ для варианта
             unique_key = self.redis_client.hget('variations', variant)
             if unique_key:
@@ -62,9 +63,9 @@ class RedisManager:
                         'pi_measurement_unit': parsed['measurement_unit'],
                         'pi_measurement_unit_alternative': parsed['measurement_unit_alt']
                     }
-            
+
             return None
-            
+
         except Exception as e:
             logging.error(f"Error in get_mapping: {str(e)}")
             return None
@@ -80,25 +81,25 @@ class RedisManager:
             'не связанное', 'не связанный', 'связанный',
             'прочие', 'другие', 'иные', 'разное'
         }
-        
+
         # Минимальная длина валидного запроса
         if len(text.strip()) < 3:
             return True
-        
+
         # Проверка на стоп-слова
         words = text.lower().split()
         if any(word in stop_words for word in words):
             return True
-        
+
         # Проверка на наличе только служебных слов
         service_words = {'с', 'по', 'для', 'на', 'в', 'и', 'или'}
         if all(word in service_words for word in words):
             return True
-        
+
         # Проверка на наличие цифр
         if any(char.isdigit() for char in text):
             return True
-        
+
         return False
 
     def _get_dictionary_entry(self, normalized_name: str) -> Dict:
@@ -111,7 +112,8 @@ class RedisManager:
                 'pi_name_gbz_tbz': parsed['gbz_name'],
                 'pi_group_is_nedra': parsed['group_name'],
                 'pi_measurement_unit': parsed['measurement_unit'],
-                'pi_measurement_unit_alternative': '' if parsed['measurement_unit_alt'] in ['nan', 'None', ''] else parsed['measurement_unit_alt']
+                'pi_measurement_unit_alternative': '' if parsed['measurement_unit_alt'] in ['nan', 'None', ''] else
+                parsed['measurement_unit_alt']
             }
         return None
 
@@ -133,7 +135,7 @@ class RedisManager:
             }
             # Исправляем формат команды hset
             pipe.hset(
-                f"mapping:{variant}", 
+                f"mapping:{variant}",
                 'mapping',  # ключ поля
                 json.dumps(data)  # значение поля
             )
@@ -155,31 +157,31 @@ class RedisManager:
         import re
         # Сначала извлекаем основной термин (до первой скобки)
         main_term = text.split('(')[0].strip()
-        
+
         # Затем извлекаем термины в скобках
         brackets_content = re.findall(r'\((.*?)\)', text)
-        
+
         components = [main_term]
         for content in brackets_content:
             components.extend([term.strip() for term in content.split(',') if term.strip()])
-            
+
         return [comp.lower() for comp in components if comp]
 
-    def add_dictionary_entry(self, normalized_name: str, gbz_name: str, 
-                           group_name: str, unit: str, unit_alt: str):
+    def add_dictionary_entry(self, normalized_name: str, gbz_name: str,
+                             group_name: str, unit: str, unit_alt: str):
         """Добавление записи в основной словарь"""
         # Заменяем 'nan' на пустую строку перед сохранением
         unit_alt = '' if pd.isna(unit_alt) or unit_alt in ['nan', 'None'] else unit_alt
-        
+
         data = {
             'gbz_name': gbz_name,
             'group_name': group_name,
             'measurement_unit': unit,
             'measurement_unit_alt': unit_alt  # Теперь здесь никогда не будет 'nan'
         }
-        
+
         self.redis_client.hset(
-            f"dictionary:{normalized_name.lower()}", 
+            f"dictionary:{normalized_name.lower()}",
             'mapping',  # ключ поля
             json.dumps(data)  # значение поля
         )
@@ -194,10 +196,10 @@ class RedisManager:
             # Загружаем основной словарь и вариации
             df_dict = pd.read_excel(dictionary_path)
             df_var = pd.read_excel(variations_path)
-            
+
             # Очищаем существующие данные
             self.redis_client.flushdb()
-            
+
             # Загружаем основной словарь
             for _, row in df_dict.iterrows():
                 dict_key = f"dictionary:{row['unique_key']}"
@@ -208,25 +210,25 @@ class RedisManager:
                     'measurement_unit': row['measurement_unit'],
                     'measurement_unit_alt': row['measurement_unit_alt']
                 })
-            
+
             # Создаем словарь для хранения вариаций и их приоритетов
             variant_priorities = {}
-            
+
             # Обрабатываем вариации и определяем их приоритеты
             for _, row in df_var.iterrows():
                 variant = row['variant'].lower()
                 unique_key = row['unique_key']
-                
+
                 # Получаем базовое название из варианта (без скобок)
                 base_name = variant.split('(')[0].strip()
-                
+
                 # Определяем приоритет на основе контекста
                 priority = 0
-                
+
                 # Если это точное совпадение с базовым названием (без дополнительного контекста)
                 if variant == base_name:
                     priority = 1
-                
+
                 # Если вариант содержит уточняющий контекст в скобках
                 if '(' in variant:
                     # Более высокий приоритет для вариантов с уточнением
@@ -234,27 +236,27 @@ class RedisManager:
                     # Особый приоритет для определенных контекстов
                     if 'бокситы' in variant.lower():
                         priority = 3
-                
+
                 # Сохраняем вариант и его приоритет
                 if variant not in variant_priorities or priority > variant_priorities[variant]['priority']:
                     variant_priorities[variant] = {
                         'unique_key': unique_key,
                         'priority': priority
                     }
-            
+
             # Загружаем вариации в Redis с учетом приоритетов
             for variant, data in variant_priorities.items():
                 variation_key = f"variation:{variant}"
                 self.redis_client.set(variation_key, data['unique_key'])
-                
+
                 # Если это базовое название, также сохраняем его отдельно
                 base_name = variant.split('(')[0].strip()
                 if base_name == variant:
                     base_key = f"variation:{base_name}"
                     self.redis_client.set(base_key, data['unique_key'])
-            
+
             logging.info(f"Loaded {len(df_dict)} dictionary entries and {len(df_var)} variations")
-            
+
         except Exception as e:
             logging.error(f"Error loading dictionaries: {str(e)}")
             raise
@@ -263,24 +265,24 @@ class RedisManager:
         """Получает точное соответствие из Redis"""
         try:
             term = term.lower().strip()
-            
+
             # Ищем точное соответствие в вариациях
             variation_key = f"variation:{term}"
             unique_key = self.redis_client.get(variation_key)
-            
+
             logging.debug(f"Looking for variation key: {variation_key}")
             if unique_key:
                 logging.debug(f"Found unique key: {unique_key}")
-                
+
                 # Декодируем bytes в строку, если это bytes
                 if isinstance(unique_key, bytes):
                     unique_key = unique_key.decode('utf-8')
-                    
+
                 # Получаем данные по уникальному ключу
                 dict_key = f"dictionary:{unique_key}"
                 logging.debug(f"Looking for dictionary key: {dict_key}")
                 data = self.redis_client.hgetall(dict_key)
-                
+
                 if data:
                     # Преобразуем bytes в строки для всех значений
                     decoded_data = {}
@@ -290,7 +292,7 @@ class RedisManager:
                         if isinstance(value, bytes):
                             value = value.decode('utf-8')
                         decoded_data[key] = value
-                    
+
                     return {
                         'normalized_name_for_display': decoded_data['normalized_name'],
                         'pi_name_gbz_tbz': decoded_data['gbz_name'],
@@ -298,9 +300,9 @@ class RedisManager:
                         'pi_measurement_unit': decoded_data['measurement_unit'],
                         'pi_measurement_unit_alternative': decoded_data['measurement_unit_alt']
                     }
-            
+
             return None
-            
+
         except Exception as e:
             logging.error(f"Error in get_exact_mapping: {str(e)}")
             return None
