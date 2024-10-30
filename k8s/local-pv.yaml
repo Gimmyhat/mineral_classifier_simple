@@ -18,7 +18,7 @@ spec:
         - key: kubernetes.io/hostname
           operator: In
           values:
-          - your-node-name  # Замените на имя вашего узла
+          - "3-164"  # Замените на имя вашего узла
 ---
 apiVersion: v1
 kind: PersistentVolume

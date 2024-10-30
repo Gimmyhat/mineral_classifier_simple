@@ -90,7 +90,7 @@ class RedisManager:
         if any(word in stop_words for word in words):
             return True
         
-        # Проверка на наличие только служебных слов
+        # Проверка на наличе только служебных слов
         service_words = {'с', 'по', 'для', 'на', 'в', 'и', 'или'}
         if all(word in service_words for word in words):
             return True
@@ -116,7 +116,7 @@ class RedisManager:
         return None
 
     def get_base_form(self, word: str) -> str:
-        """Получение базовой формы слова"""
+        """Получение базовой форм слова"""
         return self.redis_client.hget('synonyms', word.lower()) or word
 
     def bulk_add_mappings(self, mappings: list):
@@ -189,41 +189,118 @@ class RedisManager:
         self.redis_client.hset('variations', variant.lower(), normalized_name.lower())
 
     def load_dictionaries(self, dictionary_path: str, variations_path: str):
-        """Загрузка словарей с уникальными комбинациями"""
+        """Загрузка словарей в Redis"""
         try:
+            # Загружаем основной словарь и вариации
+            df_dict = pd.read_excel(dictionary_path)
+            df_var = pd.read_excel(variations_path)
+            
+            # Очищаем существующие данные
+            self.redis_client.flushdb()
+            
             # Загружаем основной словарь
-            dict_df = pd.read_excel(dictionary_path)
-            logging.debug(f"Loading dictionary from {dictionary_path}")
+            for _, row in df_dict.iterrows():
+                dict_key = f"dictionary:{row['unique_key']}"
+                self.redis_client.hmset(dict_key, {
+                    'normalized_name': row['normalized_name'],
+                    'gbz_name': row['gbz_name'],
+                    'group_name': row['group_name'],
+                    'measurement_unit': row['measurement_unit'],
+                    'measurement_unit_alt': row['measurement_unit_alt']
+                })
             
-            # Загружаем каждую уникальную комбинацию
-            for _, row in dict_df.iterrows():
+            # Создаем словарь для хранения вариаций и их приоритетов
+            variant_priorities = {}
+            
+            # Обрабатываем вариации и определяем их приоритеты
+            for _, row in df_var.iterrows():
+                variant = row['variant'].lower()
                 unique_key = row['unique_key']
-                self.redis_client.hset(
-                    f"dictionary:{unique_key}",
-                    'mapping',
-                    json.dumps({
-                        'normalized_name': row['normalized_name'],
-                        'gbz_name': row['gbz_name'],
-                        'group_name': row['group_name'],
-                        'measurement_unit': row['measurement_unit'],
-                        'measurement_unit_alt': '' if pd.isna(row['measurement_unit_alt']) else row['measurement_unit_alt']
-                    })
-                )
-
-            # Загружаем вариации
-            var_df = pd.read_excel(variations_path)
-            logging.debug(f"Loading variations from {variations_path}")
+                
+                # Получаем базовое название из варианта (без скобок)
+                base_name = variant.split('(')[0].strip()
+                
+                # Определяем приоритет на основе контекста
+                priority = 0
+                
+                # Если это точное совпадение с базовым названием (без дополнительного контекста)
+                if variant == base_name:
+                    priority = 1
+                
+                # Если вариант содержит уточняющий контекст в скобках
+                if '(' in variant:
+                    # Более высокий приоритет для вариантов с уточнением
+                    priority = 2
+                    # Особый приоритет для определенных контекстов
+                    if 'бокситы' in variant.lower():
+                        priority = 3
+                
+                # Сохраняем вариант и его приоритет
+                if variant not in variant_priorities or priority > variant_priorities[variant]['priority']:
+                    variant_priorities[variant] = {
+                        'unique_key': unique_key,
+                        'priority': priority
+                    }
             
-            # Загружаем связи вариантов с уникальными комбинациями
-            for _, row in var_df.iterrows():
-                self.redis_client.hset(
-                    'variations',
-                    row['variant'].lower(),
-                    row['unique_key']
-                )
-
-            logging.debug(f"Loaded {len(dict_df)} dictionary entries and {len(var_df)} variations")
-
+            # Загружаем вариации в Redis с учетом приоритетов
+            for variant, data in variant_priorities.items():
+                variation_key = f"variation:{variant}"
+                self.redis_client.set(variation_key, data['unique_key'])
+                
+                # Если это базовое название, также сохраняем его отдельно
+                base_name = variant.split('(')[0].strip()
+                if base_name == variant:
+                    base_key = f"variation:{base_name}"
+                    self.redis_client.set(base_key, data['unique_key'])
+            
+            logging.info(f"Loaded {len(df_dict)} dictionary entries and {len(df_var)} variations")
+            
         except Exception as e:
             logging.error(f"Error loading dictionaries: {str(e)}")
             raise
+
+    def get_exact_mapping(self, term: str) -> Dict[str, str]:
+        """Получает точное соответствие из Redis"""
+        try:
+            term = term.lower().strip()
+            
+            # Ищем точное соответствие в вариациях
+            variation_key = f"variation:{term}"
+            unique_key = self.redis_client.get(variation_key)
+            
+            logging.debug(f"Looking for variation key: {variation_key}")
+            if unique_key:
+                logging.debug(f"Found unique key: {unique_key}")
+                
+                # Декодируем bytes в строку, если это bytes
+                if isinstance(unique_key, bytes):
+                    unique_key = unique_key.decode('utf-8')
+                    
+                # Получаем данные по уникальному ключу
+                dict_key = f"dictionary:{unique_key}"
+                logging.debug(f"Looking for dictionary key: {dict_key}")
+                data = self.redis_client.hgetall(dict_key)
+                
+                if data:
+                    # Преобразуем bytes в строки для всех значений
+                    decoded_data = {}
+                    for key, value in data.items():
+                        if isinstance(key, bytes):
+                            key = key.decode('utf-8')
+                        if isinstance(value, bytes):
+                            value = value.decode('utf-8')
+                        decoded_data[key] = value
+                    
+                    return {
+                        'normalized_name_for_display': decoded_data['normalized_name'],
+                        'pi_name_gbz_tbz': decoded_data['gbz_name'],
+                        'pi_group_is_nedra': decoded_data['group_name'],
+                        'pi_measurement_unit': decoded_data['measurement_unit'],
+                        'pi_measurement_unit_alternative': decoded_data['measurement_unit_alt']
+                    }
+            
+            return None
+            
+        except Exception as e:
+            logging.error(f"Error in get_exact_mapping: {str(e)}")
+            return None

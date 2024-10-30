@@ -14,15 +14,20 @@ class MineralClassifier:
         try:
             self.db = RedisManager()
             
+            # Создаем экземпляр DictionarySplitter
+            self.dictionary_splitter = DictionarySplitter(file_path)
+            
             # Проверяем наличие файлов словарей
             dict_path = Path('data/dictionary.xlsx')
             var_path = Path('data/variations.xlsx')
             
             if not dict_path.exists() or not var_path.exists():
                 # Если файлов нет, создаем их
-                splitter = DictionarySplitter(file_path)
-                splitter.process_file()
-                splitter.save_files()
+                self.dictionary_splitter.process_file()
+                self.dictionary_splitter.save_files()
+            else:
+                # Даже если файлы существуют, нам нужно заполнить known_minerals
+                self.dictionary_splitter.process_file()
                 
             # Загружаем словари
             self.db.load_dictionaries(
@@ -30,39 +35,57 @@ class MineralClassifier:
                 variations_path='data/variations.xlsx'
             )
             
+            logging.debug(f"Initialized with {len(self.dictionary_splitter.known_minerals)} known minerals")
+            
         except Exception as e:
             logging.error(f"Error initializing classifier: {str(e)}")
             raise
 
     def classify_mineral(self, mineral_name: str) -> Dict[str, Any]:
+        """Классифицирует минерал по имени"""
+        mineral_name = mineral_name.lower().strip()
+        
         try:
-            # Разбиваем входную строку на компоненты
-            components = self._split_input(mineral_name)
+            # Сначала проверяем точное соответствие в Redis
+            exact_match = self.db.get_exact_mapping(mineral_name)
+            if exact_match:
+                logging.debug(f"Found exact match in Redis for {mineral_name}: {exact_match}")
+                return exact_match
             
-            # Ищем для каждого компонента
+            # Если точного соответствия нет, проверяем базовое соответствие
+            base_info = self.dictionary_splitter.get_base_mineral_info(mineral_name)
+            if base_info:
+                logging.debug(f"Found base mineral match for {mineral_name}: {base_info}")
+                return base_info
+            
+            # Если не нашли базовое соответствие, ищем по компонентам
+            components = self._split_input(mineral_name)
             best_result = None
             best_priority = -1
             
             for component in components:
                 result = self.db.get_mapping(component)
                 if result:
-                    # Проверяем приоритет контекста
+                    logging.debug(f"Found mapping for component {component}: {result}")
                     context_priority = self._get_context_priority(component)
                     if context_priority > best_priority:
                         best_result = result
                         best_priority = context_priority
             
             if best_result:
+                logging.debug(f"Using best result: {best_result}")
                 return best_result
             
             # Если ничего не нашли
-            return {
+            unknown_result = {
                 'normalized_name_for_display': 'неизвестно',
                 'pi_name_gbz_tbz': 'неизвестно',
                 'pi_group_is_nedra': 'неизвестно',
                 'pi_measurement_unit': '',
                 'pi_measurement_unit_alternative': ''
             }
+            logging.debug(f"No result found, returning: {unknown_result}")
+            return unknown_result
             
         except Exception as e:
             logging.error(f"Error in classify_mineral: {str(e)}")
@@ -89,7 +112,7 @@ class MineralClassifier:
         components = []
         text = text.lower().strip()
         
-        # Добавляем полный текст
+        # Добавляем полный те��ст
         components.append(text)
         
         # Извлекаем основной термин (до скобок)
@@ -151,14 +174,14 @@ class MineralClassifier:
 
     def analyze_unknown_term(self, term: str) -> Dict[str, Any]:
         """Анализ неизвестного термина"""
-        analysis = self.splitter._analyze_term(term)
+        analysis = self.dictionary_splitter._analyze_term(term)
         
         if analysis['base_mineral']:
-            # Ищем похожие термины в известных связях
-            if analysis['base_mineral'] in self.splitter.term_relationships:
-                relationships = self.splitter.term_relationships[analysis['base_mineral']]
+            # Ище�� похожие термины в известных связях
+            if analysis['base_mineral'] in self.dictionary_splitter.term_relationships:
+                relationships = self.dictionary_splitter.term_relationships[analysis['base_mineral']]
                 
-                # Находим наиболее подходящий контекст
+                # Находим наиболе подходящий контекст
                 best_match = max(relationships, 
                                key=lambda x: len(set(x['context']) & set(analysis['context'])))
                 
