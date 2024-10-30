@@ -306,3 +306,11 @@ class RedisManager:
         except Exception as e:
             logging.error(f"Error in get_exact_mapping: {str(e)}")
             return None
+
+    def check_health(self) -> bool:
+        """Проверка состояния подключения к Redis"""
+        try:
+            return self.redis_client.ping()
+        except Exception as e:
+            logging.error(f"Redis health check failed: {e}")
+            return False

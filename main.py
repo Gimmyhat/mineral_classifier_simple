@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Form, Request, UploadFile, File, HTTPException
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
@@ -19,6 +19,7 @@ from collections import defaultdict
 import asyncio
 import uuid
 from functools import lru_cache
+from redis_manager import RedisManager
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -33,9 +34,11 @@ results_dir.mkdir(exist_ok=True)
 # Создаем приложение FastAPI
 app = FastAPI(
     title="Mineral Classifier API",
-    description="API для клссификации полезных ископаемых",
+    description="API дл клссификации полезных ископаемых",
     version="1.0.0"
 )
+
+redis_manager = RedisManager()
 
 
 def custom_openapi():
@@ -358,26 +361,20 @@ async def startup_event():
     await loop.run_in_executor(None, init_classifier)
 
 
-@app.get("/health", tags=["Health"])
+@app.get("/health")
 async def health_check():
-    """
-    Проверка здоровья сервиса
-    """
     try:
-        # Проверяем подключение к Redis
-        classifier = get_classifier()
-        classifier.db.redis_client.ping()
-
-        return {
-            "status": "healthy",
-            "redis": "connected",
-            "classifier": "initialized"
-        }
+        if redis_manager and redis_manager.redis_client.ping():
+            return {"status": "healthy"}
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "message": "Redis connection failed"}
+        )
     except Exception as e:
         logging.error(f"Health check failed: {e}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=503,
-            detail=f"Service unhealthy: {str(e)}"
+            content={"status": "unhealthy", "message": str(e)}
         )
 
 
