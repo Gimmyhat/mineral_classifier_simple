@@ -32,7 +32,7 @@ class DictionarySplitter:
         return f"{normalized_name}|{gbz_name}|{group_name}"
 
     def _extract_usage_context(self, text: str) -> List[str]:
-        """Извлечение контек��та использования с приоритетами"""
+        """Извлечение контекста использования с приоритетами"""
         text = text.lower()
         contexts = []
 

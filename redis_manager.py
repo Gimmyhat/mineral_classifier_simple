@@ -153,19 +153,47 @@ class RedisManager:
 
     def _split_components(self, text: str) -> List[str]:
         """Разбивает текст на компоненты"""
-        # Разделяем по скобкам и запятым
         import re
+        
+        # Очищаем и нормализуем текст
+        text = text.lower().strip()
+        
         # Сначала извлекаем основной термин (до первой скобки)
         main_term = text.split('(')[0].strip()
-
+        
+        components = [main_term]
+        
+        # Добавляем обработку дефисов
+        if '-' in main_term:
+            # Добавляем варианты с заменой дефиса на пробел
+            components.append(main_term.replace('-', ' '))
+            # Добавляем отдельные части
+            components.extend([part.strip() for part in main_term.split('-')])
+        
         # Затем извлекаем термины в скобках
         brackets_content = re.findall(r'\((.*?)\)', text)
-
-        components = [main_term]
+        
         for content in brackets_content:
-            components.extend([term.strip() for term in content.split(',') if term.strip()])
-
-        return [comp.lower() for comp in components if comp]
+            # Обрабатываем запятые в скобках
+            parts = [term.strip() for term in content.split(',') if term.strip()]
+            components.extend(parts)
+            
+            # Обрабатываем дефисы в частях из скобок
+            for part in parts:
+                if '-' in part:
+                    components.append(part.replace('-', ' '))
+                    components.extend([p.strip() for p in part.split('-')])
+        
+        # Удаляем дубликаты и пустые строки, сохраняя порядок
+        seen = set()
+        unique_components = []
+        for comp in components:
+            if comp and comp not in seen:
+                seen.add(comp)
+                unique_components.append(comp)
+        
+        logging.debug(f"Split '{text}' into components: {unique_components}")
+        return unique_components
 
     def add_dictionary_entry(self, normalized_name: str, gbz_name: str,
                              group_name: str, unit: str, unit_alt: str):
@@ -265,42 +293,47 @@ class RedisManager:
         """Получает точное соответствие из Redis"""
         try:
             term = term.lower().strip()
-
-            # Ищем точное соответствие в вариациях
-            variation_key = f"variation:{term}"
-            unique_key = self.redis_client.get(variation_key)
-
-            logging.debug(f"Looking for variation key: {variation_key}")
-            if unique_key:
-                logging.debug(f"Found unique key: {unique_key}")
-
-                # Декодируем bytes в строку, если это bytes
-                if isinstance(unique_key, bytes):
-                    unique_key = unique_key.decode('utf-8')
-
-                # Получаем данные по уникальному ключу
-                dict_key = f"dictionary:{unique_key}"
-                logging.debug(f"Looking for dictionary key: {dict_key}")
-                data = self.redis_client.hgetall(dict_key)
-
-                if data:
-                    # Преобразуем bytes в строки для всех значений
-                    decoded_data = {}
-                    for key, value in data.items():
-                        if isinstance(key, bytes):
-                            key = key.decode('utf-8')
-                        if isinstance(value, bytes):
-                            value = value.decode('utf-8')
-                        decoded_data[key] = value
-
-                    return {
-                        'normalized_name_for_display': decoded_data['normalized_name'],
-                        'pi_name_gbz_tbz': decoded_data['gbz_name'],
-                        'pi_group_is_nedra': decoded_data['group_name'],
-                        'pi_measurement_unit': decoded_data['measurement_unit'],
-                        'pi_measurement_unit_alternative': decoded_data['measurement_unit_alt']
-                    }
-
+            
+            # Разбиваем термин на компоненты
+            components = self._split_components(term)
+            logging.debug(f"Split term '{term}' into components: {components}")
+            
+            for component in components:
+                # Ищем точное соответствие в вариациях для каждого компонента
+                variation_key = f"variation:{component}"
+                unique_key = self.redis_client.get(variation_key)
+                
+                if unique_key:
+                    logging.debug(f"Found unique key for component '{component}': {unique_key}")
+                    
+                    # Декодируем bytes в строку
+                    if isinstance(unique_key, bytes):
+                        unique_key = unique_key.decode('utf-8')
+                    
+                    # Получаем данные по уникальному ключу
+                    dict_key = f"dictionary:{unique_key}"
+                    logging.debug(f"Looking for dictionary key: {dict_key}")
+                    data = self.redis_client.hgetall(dict_key)
+                    
+                    if data:
+                        # Преобразуем bytes в строки
+                        decoded_data = {}
+                        for key, value in data.items():
+                            if isinstance(key, bytes):
+                                key = key.decode('utf-8')
+                            if isinstance(value, bytes):
+                                value = value.decode('utf-8')
+                            decoded_data[key] = value
+                        
+                        return {
+                            'normalized_name_for_display': decoded_data['normalized_name'],
+                            'pi_name_gbz_tbz': decoded_data['gbz_name'],
+                            'pi_group_is_nedra': decoded_data['group_name'],
+                            'pi_measurement_unit': decoded_data['measurement_unit'],
+                            'pi_measurement_unit_alternative': decoded_data['measurement_unit_alt']
+                        }
+            
+            # Если ничего не нашли
             return None
 
         except Exception as e:

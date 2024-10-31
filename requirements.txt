@@ -14,7 +14,16 @@ starlette>=0.14.2
 
 # Зависимости для работы с данными
 python-dateutil>=2.8.2
+numpy>=1.21.0
 
 # Зависимости для логирования
 colorama>=0.4.4
 python-json-logger>=2.0.2
+
+# Зависимости для обработки морфологии слов
+pymorphy3>=1.2.0
+pymorphy3-dicts-ru
+
+# Зависимости для нечеткого поиска
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.12.2  # Ускоряет работу fuzzywuzzy

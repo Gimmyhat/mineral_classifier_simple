@@ -20,22 +20,46 @@ import asyncio
 import uuid
 from functools import lru_cache
 from redis_manager import RedisManager
+from contextlib import asynccontextmanager
 
 logging.basicConfig(level=logging.DEBUG)
 
-# Создаем директорию для статических файлов, если её нет
+# Создаем директории
 static_dir = Path("static")
 static_dir.mkdir(exist_ok=True)
 
-# Создаем директорию для результатов
 results_dir = Path("results")
 results_dir.mkdir(exist_ok=True)
 
-# Создаем приложение FastAPI
+# Определяем lifespan ДО создания приложения
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Контекстный менеджер жизненного цикла приложения"""
+    # Код инициализации при запуске
+    cleanup_old_results(results_dir)
+    asyncio.create_task(cleanup_old_tasks())
+
+    # Инициализируем классификатор в отдельной задаче
+    def init_classifier():
+        return get_classifier()
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, init_classifier)
+    
+    logging.info("Application startup complete")
+    
+    yield  # Здесь приложение работает
+    
+    # Код очистки при выключении
+    logging.info("Application shutdown")
+    # Можно добавить очистку ресурсов при необходимости
+
+# ПОСЛЕ определения lifespan создаем приложение
 app = FastAPI(
     title="Mineral Classifier API",
-    description="API дл клссификации полезных ископаемых",
-    version="1.0.0"
+    description="API для классификации полезных ископаемых",
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 redis_manager = RedisManager()
@@ -345,20 +369,6 @@ async def cleanup_old_tasks():
         except Exception as e:
             logging.error(f"Error in cleanup_old_tasks: {e}")
             await asyncio.sleep(60)
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Выполняется при запуске приложения"""
-    cleanup_old_results(results_dir)
-    asyncio.create_task(cleanup_old_tasks())
-
-    # Инициализируем классификатор в отдельной задаче
-    def init_classifier():
-        return get_classifier()
-
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, init_classifier)
 
 
 @app.get("/health")
