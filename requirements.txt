@@ -2,7 +2,6 @@
 fastapi>=0.68.0
 uvicorn>=0.15.0
 pandas>=1.3.0
-redis>=4.0.0
 python-multipart>=0.0.5
 aiofiles>=0.7.0
 jinja2>=3.0.1
@@ -13,17 +12,15 @@ pydantic>=1.8.2
 starlette>=0.14.2
 
 # Зависимости для работы с данными
-python-dateutil>=2.8.2
-numpy>=1.21.0
+numpy>=1.24.3
 
 # Зависимости для логирования
-colorama>=0.4.4
 python-json-logger>=2.0.2
 
 # Зависимости для обработки морфологии слов
 pymorphy3>=1.2.0
 pymorphy3-dicts-ru
 
-# Зависимости для нечеткого поиска
-fuzzywuzzy>=0.18.0
-python-Levenshtein>=0.12.2  # Ускоряет работу fuzzywuzzy
+# Зависимости для базы данных
+sqlalchemy>=1.4.0
+psycopg2-binary>=2.9.0

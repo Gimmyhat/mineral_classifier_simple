@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+
+{% block title %}Неклассифицированные термины{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Неклассифицированные термины</h2>
+    
+    {% if terms %}
+    <div class="table-container">
+        <table class="result-table">
+            <thead>
+                <tr>
+                    <th>Термин</th>
+                    <th>Нормализованное название</th>
+                    <th>Название ГБЗ/ТБЗ</th>
+                    <th>Группа недр</th>
+                    <th>Ед. изм.</th>
+                    <th>Альт. ед. изм.</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for term in terms %}
+                <tr id="row-{{ loop.index }}" class="term-row">
+                    <td class="term-cell" title="{{ term }}">{{ term }}</td>
+                    <td>
+                        <select class="form-control normalized-name" data-term="{{ term }}">
+                            <option value="">Выберите...</option>
+                            {% for name in options.normalized_names %}
+                            <option value="{{ name }}">{{ name }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td>
+                        <select class="form-control gbz-name">
+                            <option value="">Выберите...</option>
+                            {% for name in options.gbz_names %}
+                            <option value="{{ name }}">{{ name }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td>
+                        <select class="form-control group-name">
+                            <option value="">Выберите...</option>
+                            {% for group in options.groups %}
+                            <option value="{{ group }}">{{ group }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td>
+                        <select class="form-control measurement-unit">
+                            <option value="">...</option>
+                            {% for unit in options.measurement_units %}
+                            <option value="{{ unit }}">{{ unit }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td>
+                        <select class="form-control measurement-unit-alt">
+                            <option value="">...</option>
+                            {% for unit in options.measurement_units %}
+                            <option value="{{ unit }}">{{ unit }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td class="actions-cell">
+                        <div class="action-buttons">
+                            <button class="icon-button save-btn" data-term="{{ term }}" title="Сохранить">
+                                <i class="fas fa-save"></i>
+                            </button>
+                            <button class="icon-button delete-btn" data-term="{{ term }}" title="Удалить">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="info-message">
+        Нет неклассифицированных терминов
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .card {
+        background-color: white;
+        border-radius: var(--border-radius);
+        padding: 15px;
+        margin: 15px 0;
+        box-shadow: var(--box-shadow);
+    }
+
+    .table-container {
+        overflow-x: auto;
+        margin-top: 10px;
+    }
+
+    .result-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+    }
+
+    .result-table th {
+        background-color: var(--primary-color);
+        color: white;
+        padding: 8px;
+        text-align: left;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+
+    .result-table td {
+        padding: 4px 8px;
+        border-bottom: 1px solid #eee;
+        vertical-align: middle;
+    }
+
+    .term-cell {
+        min-width: 200px;
+        word-wrap: break-word;
+        white-space: normal;
+    }
+
+    .form-control {
+        width: 100%;
+        padding: 4px 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+        height: 28px;
+    }
+
+    .form-control:focus {
+        border-color: var(--primary-color);
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(var(--primary-color-rgb), 0.1);
+    }
+
+    .actions-cell {
+        white-space: nowrap;
+        width: 80px;
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 4px;
+        justify-content: center;
+    }
+
+    .icon-button {
+        padding: 4px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+    }
+
+    .save-btn {
+        background-color: var(--primary-color);
+        color: white;
+    }
+
+    .delete-btn {
+        background-color: #dc3545;
+        color: white;
+    }
+
+    .icon-button:hover {
+        opacity: 0.9;
+        transform: translateY(-1px);
+    }
+
+    /* Стили для выпадающих списков */
+    select.form-control {
+        appearance: none;
+        background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+        background-repeat: no-repeat;
+        background-position: right 8px center;
+        background-size: 12px;
+        padding-right: 24px;
+    }
+
+    /* Адаптивность */
+    @media (max-width: 1200px) {
+        .form-control {
+            min-width: 120px;
+        }
+    }
+
+    @media (max-width: 768px) {
+        .result-table {
+            font-size: 12px;
+        }
+
+        .form-control {
+            padding: 2px 4px;
+            height: 24px;
+            min-width: 100px;
+        }
+
+        .icon-button {
+            width: 24px;
+            height: 24px;
+            font-size: 12px;
+        }
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Обработка кнопки "Сохранить"
+    document.querySelectorAll('.save-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const term = this.dataset.term;
+            const row = this.closest('tr');
+            
+            const data = {
+                term: term,
+                normalized_name: row.querySelector('.normalized-name').value,
+                gbz_name: row.querySelector('.gbz-name').value,
+                group_name: row.querySelector('.group-name').value,
+                measurement_unit: row.querySelector('.measurement-unit').value,
+                measurement_unit_alt: row.querySelector('.measurement-unit-alt').value
+            };
+
+            // Проверка заполнения обязательных полей
+            const requiredFields = ['normalized_name', 'gbz_name', 'group_name', 'measurement_unit'];
+            const emptyFields = requiredFields.filter(field => !data[field]);
+            
+            if (emptyFields.length > 0) {
+                alert('Пожалуйста, заполните все обязательные поля');
+                return;
+            }
+
+            try {
+                const response = await fetch('/add_classification', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    row.remove();
+                    if (document.querySelectorAll('tbody tr').length === 0) {
+                        location.reload();
+                    }
+                } else {
+                    throw new Error('Failed to save classification');
+                }
+            } catch (error) {
+                console.error('Error saving classification:', error);
+                alert('Ошибка при сохранении классификации');
+            }
+        });
+    });
+
+    // Обработка кнопки "Удалить"
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            if (confirm('Вы уверены, что хотите удалить этот термин?')) {
+                const term = this.dataset.term;
+                const row = this.closest('tr');
+                
+                try {
+                    const response = await fetch(`/remove_unclassified/${encodeURIComponent(term)}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (response.ok) {
+                        row.remove();
+                        if (document.querySelectorAll('tbody tr').length === 0) {
+                            location.reload();
+                        }
+                    } else {
+                        throw new Error('Failed to delete term');
+                    }
+                } catch (error) {
+                    console.error('Error deleting term:', error);
+                    alert('Ошибка при удалении термина');
+                }
+            }
+        });
+    });
+});
+</script>
+{% endblock %} 

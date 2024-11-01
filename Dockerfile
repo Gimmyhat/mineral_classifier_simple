@@ -2,30 +2,20 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Установка системных зависимостей
+# Установка необходимых пакетов
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
+    postgresql-client \
+    netcat-traditional \
     && rm -rf /var/lib/apt/lists/*
 
-# Копируем файлы зависимостей
 COPY requirements.txt .
-
-# Устанавливаем зависимости
+RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем код приложения
-COPY *.py ./
+COPY . .
 
-# Копируем директории
-COPY templates/ templates/
-COPY static/ static/
-COPY data/ data/
+# Делаем скрипт исполняемым
+RUN chmod +x wait-for-postgres.sh
 
-# Создаем необходимые директории
-RUN mkdir -p static results templates logs
-
-# Открываем порт
-EXPOSE 8001
-
-CMD ["python", "main.py"]
+# Используем скрипт ожидания как точку входа
+ENTRYPOINT ["./wait-for-postgres.sh", "postgres"]

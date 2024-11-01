@@ -4,6 +4,7 @@ from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from typing import List
 import uvicorn
@@ -19,8 +20,7 @@ from collections import defaultdict
 import asyncio
 import uuid
 from functools import lru_cache
-from redis_manager import RedisManager
-from contextlib import asynccontextmanager
+from database import DatabaseManager
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -62,7 +62,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-redis_manager = RedisManager()
+# Создаем экземпляры менеджеров
+db_manager = DatabaseManager()
 
 
 def custom_openapi():
@@ -374,11 +375,14 @@ async def cleanup_old_tasks():
 @app.get("/health")
 async def health_check():
     try:
-        if redis_manager and redis_manager.redis_client.ping():
+        db_healthy = db_manager.check_health()
+        
+        if db_healthy:
             return {"status": "healthy"}
+            
         return JSONResponse(
             status_code=503,
-            content={"status": "unhealthy", "message": "Redis connection failed"}
+            content={"status": "unhealthy", "message": "Database connection failed"}
         )
     except Exception as e:
         logging.error(f"Health check failed: {e}")
@@ -386,6 +390,108 @@ async def health_check():
             status_code=503,
             content={"status": "unhealthy", "message": str(e)}
         )
+
+
+class ClassificationInput(BaseModel):
+    term: str
+    normalized_name: str
+    gbz_name: str
+    group_name: str
+    measurement_unit: str
+    measurement_unit_alt: str = ""
+
+@app.get("/unclassified", response_class=HTMLResponse, tags=["Interactive Classification"])
+async def show_unclassified(request: Request):
+    """Показывает страницу с неклассифицированными терминами"""
+    try:
+        batch_processor = get_batch_processor()
+        terms = batch_processor.get_unclassified_terms()
+        options = batch_processor.get_classification_options()
+        
+        logging.debug(f"Unclassified terms: {terms}")
+        logging.debug(f"Classification options: {options}")
+        
+        return templates.TemplateResponse(
+            "unclassified.html",
+            {
+                "request": request,
+                "terms": terms,
+                "options": options
+            }
+        )
+    except Exception as e:
+        logging.error(f"Error showing unclassified terms: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/add_classification", tags=["Interactive Classification"])
+async def add_classification(classification: ClassificationInput):
+    """Добавляет новую классификацию"""
+    try:
+        # Проверяем обязательные поля
+        if not all([
+            classification.term,
+            classification.normalized_name,
+            classification.gbz_name,
+            classification.group_name,
+            classification.measurement_unit
+        ]):
+            raise HTTPException(
+                status_code=400,
+                detail="All fields except measurement_unit_alt are required"
+            )
+
+        batch_processor = get_batch_processor()
+        success = batch_processor.add_classification(
+            classification.term,
+            {
+                'normalized_name': classification.normalized_name,
+                'gbz_name': classification.gbz_name,
+                'group_name': classification.group_name,
+                'measurement_unit': classification.measurement_unit,
+                'measurement_unit_alt': classification.measurement_unit_alt
+            }
+        )
+        
+        if success:
+            return {"status": "success", "message": "Classification added successfully"}
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to add classification in batch processor"
+            )
+    except Exception as e:
+        logging.error(f"Error adding classification: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+@app.get("/suggest_classification/{term}", tags=["Interactive Classification"])
+async def suggest_classification(term: str):
+    """Предлагает классификацию для термина"""
+    try:
+        batch_processor = get_batch_processor()
+        suggestion = batch_processor.learner.suggest_classification(term)
+        if suggestion:
+            return suggestion
+        return {"message": "No suggestion found"}
+    except Exception as e:
+        logging.error(f"Error suggesting classification: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/remove_unclassified/{term}", tags=["Interactive Classification"])
+async def remove_unclassified(term: str):
+    """Удаляет термин из списка неклассифицированных"""
+    try:
+        batch_processor = get_batch_processor()
+        success = batch_processor.learner.db.remove_unclassified_term(term)
+        if success:
+            return {"status": "success", "message": "Term removed successfully"}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to remove term")
+    except Exception as e:
+        logging.error(f"Error removing unclassified term: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

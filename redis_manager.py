@@ -1,9 +1,10 @@
 import redis
 import json
 import logging
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Union
 from config import REDIS_CONFIG
 import pandas as pd
+import re
 
 
 class RedisManager:
@@ -31,7 +32,7 @@ class RedisManager:
             'measurement_unit': unit,
             'measurement_unit_alt': unit_alt
         }
-        # Сохраняем маппинг
+        # Сохраняем маппиг
         self.redis_client.hset(
             f"mapping:{variant.lower()}",
             mapping=json.dumps(mapping)
@@ -92,7 +93,7 @@ class RedisManager:
             return True
 
         # Проверка на наличе только служебных слов
-        service_words = {'с', 'по', 'для', 'на', 'в', 'и', 'или'}
+        service_words = {'с', 'по', 'дл', 'на', 'в', 'и', 'ли'}
         if all(word in service_words for word in words):
             return True
 
@@ -153,47 +154,26 @@ class RedisManager:
 
     def _split_components(self, text: str) -> List[str]:
         """Разбивает текст на компоненты"""
-        import re
+        components = []
         
-        # Очищаем и нормализуем текст
-        text = text.lower().strip()
-        
-        # Сначала извлекаем основной термин (до первой скобки)
+        # Извлекаем основной термин (до скобок)
         main_term = text.split('(')[0].strip()
+        components.append(main_term)
         
-        components = [main_term]
-        
-        # Добавляем обработку дефисов
+        # Если есть дефис, добавляем варианты
         if '-' in main_term:
-            # Добавляем варианты с заменой дефиса на пробел
+            # Вариант с пробелами
             components.append(main_term.replace('-', ' '))
-            # Добавляем отдельные части
-            components.extend([part.strip() for part in main_term.split('-')])
-        
-        # Затем извлекаем термины в скобках
-        brackets_content = re.findall(r'\((.*?)\)', text)
-        
-        for content in brackets_content:
-            # Обрабатываем запятые в скобках
-            parts = [term.strip() for term in content.split(',') if term.strip()]
+            # Отдельные части
+            parts = [p.strip() for p in main_term.split('-')]
             components.extend(parts)
-            
-            # Обрабатываем дефисы в частях из скобок
-            for part in parts:
-                if '-' in part:
-                    components.append(part.replace('-', ' '))
-                    components.extend([p.strip() for p in part.split('-')])
         
-        # Удаляем дубликаты и пустые строки, сохраняя порядок
-        seen = set()
-        unique_components = []
-        for comp in components:
-            if comp and comp not in seen:
-                seen.add(comp)
-                unique_components.append(comp)
+        # Если есть пробелы, добавляем отдельные слова
+        if ' ' in main_term:
+            components.extend([w.strip() for w in main_term.split()])
         
-        logging.debug(f"Split '{text}' into components: {unique_components}")
-        return unique_components
+        # Удаляем дубликаты и пустые строки
+        return [c for c in dict.fromkeys(components) if c]
 
     def add_dictionary_entry(self, normalized_name: str, gbz_name: str,
                              group_name: str, unit: str, unit_alt: str):
@@ -228,60 +208,69 @@ class RedisManager:
             # Очищаем существующие данные
             self.redis_client.flushdb()
 
-            # Загружаем основной словарь
+            # Сначала з��гружаем основной словарь
             for _, row in df_dict.iterrows():
                 dict_key = f"dictionary:{row['unique_key']}"
-                self.redis_client.hmset(dict_key, {
+                mapping_data = {
                     'normalized_name': row['normalized_name'],
                     'gbz_name': row['gbz_name'],
                     'group_name': row['group_name'],
                     'measurement_unit': row['measurement_unit'],
                     'measurement_unit_alt': row['measurement_unit_alt']
-                })
+                }
+                # Сохраняем как JSON строку
+                self.redis_client.hset(dict_key, 'mapping', json.dumps(mapping_data))
 
             # Создаем словарь для хранения вариаций и их приоритетов
             variant_priorities = {}
 
-            # Обрабатываем вариации и определяем их приоритеты
+            # Затем загружаем вариации
             for _, row in df_var.iterrows():
-                variant = row['variant'].lower()
+                variant = row['variant'].lower().strip()
                 unique_key = row['unique_key']
-
-                # Получаем базовое название из варианта (без скобок)
-                base_name = variant.split('(')[0].strip()
-
-                # Определяем приоритет на основе контекста
+                
+                # Определяем приоритет варианта
                 priority = 0
-
-                # Если это точное совпадение с базовым названием (без дополнительного контекста)
-                if variant == base_name:
-                    priority = 1
-
-                # Если вариант содержит уточняющий контекст в скобках
+                
+                # Если это точное совпадение с вариантом из файла
                 if '(' in variant:
-                    # Более высокий приоритет для вариантов с уточнением
-                    priority = 2
-                    # Особый приоритет для определенных контекстов
-                    if 'бокситы' in variant.lower():
-                        priority = 3
+                    priority = 3  # Высший приоритет для вариантов с контекстом
+                    # Сохраняем полный вариант как есть
+                    self.redis_client.hset('variations', variant, unique_key)
+                    
+                    # Извлекаем основной термин и контексты
+                    main_term = variant.split('(')[0].strip()
+                    context_part = variant[variant.find('(')+1:variant.find(')')].strip()
+                    contexts = [ctx.strip() for ctx in context_part.split(',')]
+                    
+                    # Сохраняем варианты с каждым контекстом
+                    for context in contexts:
+                        context_variant = f"{main_term} ({context})"
+                        self.redis_client.hset('variations', context_variant, unique_key)
+                    
+                    # Сохраняем ос��овной термин
+                    if main_term not in variant_priorities or priority > variant_priorities[main_term]['priority']:
+                        variant_priorities[main_term] = {'unique_key': unique_key, 'priority': 2}
+                else:
+                    # Для вариантов без контекста
+                    if variant not in variant_priorities or priority > variant_priorities[variant]['priority']:
+                        variant_priorities[variant] = {'unique_key': unique_key, 'priority': 1}
+                
+                # Если есть дефис, сохраняем вариант с пробелом
+                if '-' in variant:
+                    space_variant = variant.replace('-', ' ')
+                    if '(' in space_variant:
+                        self.redis_client.hset('variations', space_variant, unique_key)
+                        main_term = space_variant.split('(')[0].strip()
+                        if main_term not in variant_priorities or 2 > variant_priorities[main_term]['priority']:
+                            variant_priorities[main_term] = {'unique_key': unique_key, 'priority': 2}
+                    else:
+                        if space_variant not in variant_priorities or 1 > variant_priorities[space_variant]['priority']:
+                            variant_priorities[space_variant] = {'unique_key': unique_key, 'priority': 1}
 
-                # Сохраняем вариант и его приоритет
-                if variant not in variant_priorities or priority > variant_priorities[variant]['priority']:
-                    variant_priorities[variant] = {
-                        'unique_key': unique_key,
-                        'priority': priority
-                    }
-
-            # Загружаем вариации в Redis с учетом приоритетов
+            # Сохраняем все варианты с учетом приоритетов
             for variant, data in variant_priorities.items():
-                variation_key = f"variation:{variant}"
-                self.redis_client.set(variation_key, data['unique_key'])
-
-                # Если это базовое название, также сохраняем его отдельно
-                base_name = variant.split('(')[0].strip()
-                if base_name == variant:
-                    base_key = f"variation:{base_name}"
-                    self.redis_client.set(base_key, data['unique_key'])
+                self.redis_client.hset('variations', variant, data['unique_key'])
 
             logging.info(f"Loaded {len(df_dict)} dictionary entries and {len(df_var)} variations")
 
@@ -289,55 +278,143 @@ class RedisManager:
             logging.error(f"Error loading dictionaries: {str(e)}")
             raise
 
-    def get_exact_mapping(self, term: str) -> Dict[str, str]:
+    def _normalize_input(self, text: str) -> List[str]:
+        """Нормализует входной текст и возвращает список возможных вариантов"""
+        text = text.lower().strip()
+        variants = set()
+        
+        # Добавляем исходный текст
+        variants.add(text)
+        
+        # 1. Убираем повторяющиеся буквы в конце
+        cleaned = re.sub(r'(.)\1+$', r'\1', text)
+        variants.add(cleaned)
+        
+        # 2. Обработка окончаний
+        # Список типичных окончаний существительных в русском языке
+        endings = ['ий', 'ый', 'ая', 'яя', 'ое', 'ее', 'а', 'я', 'о', 'е', 'ом', 'ем', 
+                  'ами', 'ями', 'ах', 'ях', 'у', 'ю', 'ы', 'и', 'ей', 'ов', 'ев']
+        
+        # Находим базовую форму, убирая возможные окончаня
+        base_word = text
+        for ending in sorted(endings, key=len, reverse=True):  # Сортируем по длине, чтобы сначала проверять длинные окончания
+            if text.endswith(ending) and len(text) > len(ending) + 2:  # +2 чтобы оставалось хотя бы 2 буквы основы
+                base_word = text[:-len(ending)]
+                variants.add(base_word)
+                break
+        
+        # 3. Получаем варианты из Redis
+        # Проверяем, есть ли в базе похожие слова
+        for variant in self.redis_client.scan_iter(match=f"variation:{base_word}*"):
+            if isinstance(variant, bytes):
+                variant = variant.decode('utf-8')
+            # Убираем префикс 'variation:'
+            clean_variant = variant.split(':', 1)[1]
+            variants.add(clean_variant)
+        
+        # 4. Добавляем варианты с возможными опечатками
+        for v in list(variants):  # list() чтобы избежать изменения set во время итерации
+            # Замена повторяющихся букв
+            cleaned_var = re.sub(r'(.)\1+', r'\1', v)
+            variants.add(cleaned_var)
+            
+            # Обработка частых замен букв (е/ё, й/и в конце и т.д.)
+            if v.endswith('й'):
+                variants.add(v[:-1] + 'и')
+            if v.endswith('и'):
+                variants.add(v[:-1] + 'й')
+        
+        logging.debug(f"Normalized variants for '{text}': {variants}")
+        return list(variants)
+
+    def get_exact_mapping(self, term: str) -> Optional[Dict]:
         """Получает точное соответствие из Redis"""
         try:
+            if self._is_invalid_query(term):
+                logging.debug(f"Invalid query: {term}")
+                return None
+                
             term = term.lower().strip()
             
-            # Разбиваем термин на компоненты
-            components = self._split_components(term)
-            logging.debug(f"Split term '{term}' into components: {components}")
+            # 1. Пробуем найти точное соответствие для полного термина
+            unique_key = self.redis_client.hget('variations', term)
+            if unique_key:
+                return self._get_mapping_by_key(unique_key)
             
-            for component in components:
-                # Ищем точное соответствие в вариациях для каждого компонента
-                variation_key = f"variation:{component}"
-                unique_key = self.redis_client.get(variation_key)
-                
+            # 2. Извлекаем основной термин и контексты
+            main_term = term
+            contexts = []
+            if '(' in term and ')' in term:
+                main_term = term.split('(')[0].strip()
+                # Извлекаем контексты из скобок и разбиваем по запятой
+                context_part = term[term.find('(')+1:term.find(')')].strip()
+                contexts = [ctx.strip() for ctx in context_part.split(',')]
+            
+            # 3. Формируем все возможные варианты запроса
+            variants = []
+            
+            # Добавляем основной термин
+            variants.append(main_term)
+            
+            # Добавляем варианты с каждым контекстом
+            for context in contexts:
+                variants.append(f"{main_term} ({context})")
+                variants.append(f"{main_term} {context}")
+            
+            # Если есть несколько контекстов, добавляем полный вариант
+            if len(contexts) > 1:
+                full_context = ', '.join(contexts)
+                variants.append(f"{main_term} ({full_context})")
+            
+            # Если в основном термине есть дефис, добавляем вариант с пробелом
+            if '-' in main_term:
+                space_variant = main_term.replace('-', ' ')
+                variants.append(space_variant)
+                # Также добавляем варианты с контекстом
+                for context in contexts:
+                    variants.append(f"{space_variant} ({context})")
+                    variants.append(f"{space_variant} {context}")
+            
+            logging.debug(f"Trying variants: {variants}")
+            
+            # 4. Проверяем все варианты
+            for variant in variants:
+                unique_key = self.redis_client.hget('variations', variant)
                 if unique_key:
-                    logging.debug(f"Found unique key for component '{component}': {unique_key}")
-                    
-                    # Декодируем bytes в строку
-                    if isinstance(unique_key, bytes):
-                        unique_key = unique_key.decode('utf-8')
-                    
-                    # Получаем данные по уникальному ключу
-                    dict_key = f"dictionary:{unique_key}"
-                    logging.debug(f"Looking for dictionary key: {dict_key}")
-                    data = self.redis_client.hgetall(dict_key)
-                    
-                    if data:
-                        # Преобразуем bytes в строки
-                        decoded_data = {}
-                        for key, value in data.items():
-                            if isinstance(key, bytes):
-                                key = key.decode('utf-8')
-                            if isinstance(value, bytes):
-                                value = value.decode('utf-8')
-                            decoded_data[key] = value
-                        
-                        return {
-                            'normalized_name_for_display': decoded_data['normalized_name'],
-                            'pi_name_gbz_tbz': decoded_data['gbz_name'],
-                            'pi_group_is_nedra': decoded_data['group_name'],
-                            'pi_measurement_unit': decoded_data['measurement_unit'],
-                            'pi_measurement_unit_alternative': decoded_data['measurement_unit_alt']
-                        }
+                    logging.debug(f"Found match for variant: {variant}")
+                    return self._get_mapping_by_key(unique_key)
             
-            # Если ничего не нашли
+            logging.debug(f"No match found for '{term}' and its variants")
             return None
 
         except Exception as e:
             logging.error(f"Error in get_exact_mapping: {str(e)}")
+            return None
+
+    def _get_mapping_by_key(self, unique_key: Union[str, bytes]) -> Optional[Dict]:
+        """Получает маппинг по ключу"""
+        try:
+            if isinstance(unique_key, bytes):
+                unique_key = unique_key.decode('utf-8')
+                
+            dict_key = f"dictionary:{unique_key}"
+            mapping_data = self.redis_client.hget(dict_key, 'mapping')
+            
+            if mapping_data:
+                if isinstance(mapping_data, bytes):
+                    mapping_data = mapping_data.decode('utf-8')
+                
+                parsed = json.loads(mapping_data)
+                return {
+                    'normalized_name_for_display': parsed['normalized_name'],
+                    'pi_name_gbz_tbz': parsed['gbz_name'],
+                    'pi_group_is_nedra': parsed['group_name'],
+                    'pi_measurement_unit': parsed['measurement_unit'],
+                    'pi_measurement_unit_alternative': parsed['measurement_unit_alt']
+                }
+            return None
+        except Exception as e:
+            logging.error(f"Error getting mapping by key: {e}")
             return None
 
     def check_health(self) -> bool:
@@ -347,3 +424,51 @@ class RedisManager:
         except Exception as e:
             logging.error(f"Redis health check failed: {e}")
             return False
+
+    def save_dictionaries(self, dictionary_path: str, variations_path: str):
+        """Сохраняет текущее состояние словарей в файлы"""
+        try:
+            # Собираем данные для основного словаря
+            dict_entries = []
+            for key in self.redis_client.scan_iter("dictionary:*"):
+                if isinstance(key, bytes):
+                    key = key.decode('utf-8')
+                data = self.redis_client.hget(key, 'mapping')
+                if data:
+                    if isinstance(data, bytes):
+                        data = data.decode('utf-8')
+                    parsed = json.loads(data)
+                    unique_key = key.split(':')[1]
+                    dict_entries.append({
+                        'unique_key': unique_key,
+                        'normalized_name': parsed['normalized_name'],
+                        'gbz_name': parsed['gbz_name'],
+                        'group_name': parsed['group_name'],
+                        'measurement_unit': parsed['measurement_unit'],
+                        'measurement_unit_alt': parsed['measurement_unit_alt']
+                    })
+
+            # Собираем данные для вариаций
+            var_entries = []
+            for key, value in self.redis_client.hgetall('variations').items():
+                if isinstance(key, bytes):
+                    key = key.decode('utf-8')
+                if isinstance(value, bytes):
+                    value = value.decode('utf-8')
+                var_entries.append({
+                    'variant': key,
+                    'unique_key': value
+                })
+
+            # Сохраняем в Excel файлы
+            df_dict = pd.DataFrame(dict_entries)
+            df_var = pd.DataFrame(var_entries)
+
+            df_dict.to_excel(dictionary_path, index=False)
+            df_var.to_excel(variations_path, index=False)
+
+            logging.info(f"Saved {len(dict_entries)} dictionary entries and {len(var_entries)} variations")
+
+        except Exception as e:
+            logging.error(f"Error saving dictionaries: {e}")
+            raise

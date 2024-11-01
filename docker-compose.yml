@@ -6,47 +6,34 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      - ./data:/app/data
-      - ./results:/app/results
-      - ./logs:/app/logs
-      - ./templates:/app/templates
-      - ./static:/app/static
+      - .:/app
       - ./Справочник_для_редактирования_09.10.2024.xlsx:/app/Справочник_для_редактирования_09.10.2024.xlsx
-      - ./data/dictionary.xlsx:/app/data/dictionary.xlsx
-      - ./data/variations.xlsx:/app/data/variations.xlsx
     depends_on:
-      - redis
+      postgres:
+        condition: service_healthy
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - PYTHONUNBUFFERED=1
-    networks:
-      - app-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+      - POSTGRES_HOST=postgres
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=minerals
+    restart: unless-stopped
 
-  redis:
-    image: redis:alpine
+  postgres:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=minerals
     ports:
-      - "6379:6379"
+      - "5432:5432"
     volumes:
-      - redis-data:/data
-    networks:
-      - app-network
-    command: redis-server --appendonly yes
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD-SHELL", "pg_isready -U user -d minerals"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
 volumes:
-  redis-data:
-
-networks:
-  app-network:
-    driver: bridge
+  postgres_data:

@@ -1,8 +1,10 @@
 import os
 
-REDIS_CONFIG = {
-    'host': os.getenv('REDIS_HOST', 'localhost'),
-    'port': int(os.getenv('REDIS_PORT', 6379)),
-    'db': 0,
-    'decode_responses': True
+# PostgreSQL configuration
+DATABASE_CONFIG = {
+    'host': os.getenv('POSTGRES_HOST', 'postgres'),
+    'user': os.getenv('POSTGRES_USER', 'user'),
+    'password': os.getenv('POSTGRES_PASSWORD', 'password'),
+    'database': os.getenv('POSTGRES_DB', 'minerals'),
+    'port': 5432
 }
