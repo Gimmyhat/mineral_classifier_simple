@@ -365,7 +365,7 @@ async def show_unclassified(request: Request):
     """Показывает станицу с неклассифицированными терминами"""
     try:
         # Используем кастомный декоратор для кэширования
-        @timed_lru_cache(seconds=300, maxsize=1)  # кэш на 5 инут
+        @timed_lru_cache(seconds=300, maxsize=1)  # кэш а 5 инут
         def get_cached_options():
             batch_processor = get_batch_processor()
             return batch_processor.get_classification_options()
@@ -456,13 +456,23 @@ async def remove_unclassified(term: str):
         logging.error(f"Error removing unclassified term: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Добавим кэширование для dictionary entries
+@timed_lru_cache(seconds=300, maxsize=1)  # кэш на 5 минут
+def get_cached_dictionary_entries():
+    db_manager = DatabaseManager()
+    return db_manager.get_dictionary_entries()
+
+@timed_lru_cache(seconds=300, maxsize=1)  # кэш на 5 минут
+def get_cached_classification_options():
+    db_manager = DatabaseManager()
+    return db_manager.get_classification_options()
+
 @app.get("/dictionary", response_class=HTMLResponse, tags=["Dictionary Management"])
 async def show_dictionary(request: Request):
     """Показывает страницу редактирования справочника"""
     try:
-        db_manager = DatabaseManager()
-        entries = db_manager.get_dictionary_entries()
-        options = db_manager.get_classification_options()
+        entries = get_cached_dictionary_entries()
+        options = get_cached_classification_options()
         
         return templates.TemplateResponse(
             "dictionary.html",
@@ -619,6 +629,49 @@ async def progress(request: Request):
 
     return EventSourceResponse(event_generator())
 
+@app.delete("/remove_all_unclassified", tags=["Interactive Classification"])
+async def remove_all_unclassified():
+    """Удаляет все неклассифицированные термины"""
+    try:
+        batch_processor = get_batch_processor()
+        success = batch_processor.learner.db.remove_all_unclassified_terms()
+        if success:
+            return {"status": "success", "message": "All terms removed successfully"}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to remove terms")
+    except Exception as e:
+        logging.error(f"Error removing all unclassified terms: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/classify", tags=["Classification"])
+async def classify_mineral(request: Request):
+    """Классифицирует отдельный минерал"""
+    try:
+        form_data = await request.form()
+        term = form_data.get('term')
+        
+        if not term:
+            raise HTTPException(
+                status_code=400,
+                detail="Термин для классификации не указан"
+            )
+
+        classifier = get_classifier()
+        result = classifier.classify_mineral(term)
+        
+        if result:
+            return result
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="Классификация не найдена"
+            )
+    except Exception as e:
+        logging.error(f"Error classifying mineral: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при классификации: {str(e)}"
+        )
 
 if __name__ == "__main__":
     try:
@@ -627,7 +680,7 @@ if __name__ == "__main__":
             Path("templates/base.html"),
             Path("templates/home.html"),
             Path("templates/upload.html"),
-            Path("Справочник_для_редактирования_09.10.2024.xlsx")
+            Path("Справочник_ля_редактирования_09.10.2024.xlsx")
         ]
 
         for file in required_files:

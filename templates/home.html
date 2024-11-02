@@ -25,10 +25,11 @@
 
 <div class="card">
     <h2>Классификация минерала</h2>
-    <form action="/classify_form" method="post" id="searchForm" class="search-form">
+    <form id="searchForm" class="search-form" onsubmit="classifyMineral(event)">
         <div class="input-group">
             <input type="text"
-                   name="mineral_name"
+                   id="mineral-term"
+                   name="term"
                    placeholder="Введите название минерала"
                    required
                    class="form-control">
@@ -37,12 +38,7 @@
             </button>
         </div>
     </form>
-    <div id="result" class="result-card" style="display: none;">
-        <h3>Результат классификации</h3>
-        <table class="result-table">
-            <tbody id="resultTable"></tbody>
-        </table>
-    </div>
+    <div id="classification-result" class="result-card"></div>
 </div>
 
 <div class="card info-card">
@@ -243,52 +239,74 @@
 </style>
 
 <script>
-document.getElementById('searchForm').onsubmit = async function(e) {
-    e.preventDefault();
-
-    const formData = new FormData(this);
-    const mineralName = formData.get('mineral_name');
+async function classifyMineral(event) {
+    event.preventDefault();
+    
+    const term = document.getElementById('mineral-term').value;
+    if (!term) {
+        alert('Пожалуйста, введите термин для классификации');
+        return;
+    }
 
     try {
+        const formData = new FormData();
+        formData.append('term', term);
+
         const response = await fetch('/classify', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ mineral_name: mineralName })
+            body: formData
         });
 
         if (!response.ok) {
-            throw new Error('Ошибка при получении данных');
+            const error = await response.json();
+            throw new Error(error.detail || 'Ошибка при получении данных');
         }
 
-        const data = await response.json();
-
-        if (!data) {
-            throw new Error('Пустой ответ от сервера');
-        }
-
-        // Создаем таблицу с результатами
-        const resultTable = document.getElementById('resultTable');
-        resultTable.innerHTML = `
-            <tr><td>Группа недр</td><td>${data.pi_group_is_nedra || 'не определено'}</td></tr>
-            <tr><td>Название ГБЗ/ТБЗ</td><td>${data.pi_name_gbz_tbz || 'не определено'}</td></tr>
-            <tr><td>Нормализованное название</td><td>${data.normalized_name_for_display || 'не определено'}</td></tr>
-            <tr><td>Единица измерения</td><td>${data.pi_measurement_unit || 'не определено'}</td></tr>
-            <tr><td>Альтернативная единица измерения</td><td>${data.pi_measurement_unit_alternative || 'не определено'}</td></tr>
-        `;
-
-        document.getElementById('result').style.display = 'block';
+        const result = await response.json();
+        displayResult(result);
     } catch (error) {
         console.error('Error:', error);
-        const resultTable = document.getElementById('resultTable');
-        resultTable.innerHTML = `
-            <tr><td colspan="2" class="error-message">
-                Произошла ошибка при классификации: ${error.message}
-            </td></tr>
-        `;
-        document.getElementById('result').style.display = 'block';
+        displayError(error.message);
     }
-};
+}
+
+function displayResult(result) {
+    const resultDiv = document.getElementById('classification-result');
+    resultDiv.innerHTML = `
+        <h3>Результат классификации</h3>
+        <table class="result-table">
+            <tr>
+                <td>Нормализованное название:</td>
+                <td>${result.normalized_name_for_display}</td>
+            </tr>
+            <tr>
+                <td>Название ГБЗ/ТБЗ:</td>
+                <td>${result.pi_name_gbz_tbz}</td>
+            </tr>
+            <tr>
+                <td>Группа недр:</td>
+                <td>${result.pi_group_is_nedra}</td>
+            </tr>
+            <tr>
+                <td>Единица измерения:</td>
+                <td>${result.pi_measurement_unit}</td>
+            </tr>
+            <tr>
+                <td>Альтернативная единица измерения:</td>
+                <td>${result.pi_measurement_unit_alternative || '-'}</td>
+            </tr>
+        </table>
+    `;
+}
+
+function displayError(message) {
+    const resultDiv = document.getElementById('classification-result');
+    resultDiv.innerHTML = `
+        <h3>Результат классификации</h3>
+        <div class="error-message">
+            Произошла ошибка при классификации: ${message}
+        </div>
+    `;
+}
 </script>
 {% endblock %}

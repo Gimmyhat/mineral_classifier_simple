@@ -7,7 +7,15 @@
 <h1>Неклассифицированные термины</h1>
 
 <div class="card">
-    <h2>Неклассифицированные термины</h2>
+    <div class="header-actions">
+        <h2>Неклассифицированные термины</h2>
+        {% if terms %}
+        <button class="button delete-all-btn" onclick="removeAllTerms()">
+            <i class="fas fa-trash-alt"></i>
+            Удалить все записи
+        </button>
+        {% endif %}
+    </div>
     
     {% if terms %}
     <div class="table-container">
@@ -219,6 +227,30 @@
             font-size: 12px;
         }
     }
+
+    .header-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .delete-all-btn {
+        background-color: #dc3545;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: all 0.2s;
+    }
+
+    .delete-all-btn:hover {
+        background-color: #c82333;
+    }
 </style>
 
 <script>
@@ -243,7 +275,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const emptyFields = requiredFields.filter(field => !data[field]);
             
             if (emptyFields.length > 0) {
-                alert('Пожалуйста, заполните вс�� обязательные поля');
+                alert('Пожалуйста, заполните все обязательные поля');
                 return;
             }
 
@@ -299,5 +331,25 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
+
+// Добавим функцию для удаления всех записей
+async function removeAllTerms() {
+    if (confirm('Вы уверены, что хотите удалить ВСЕ неклассифицированные термины?')) {
+        try {
+            const response = await fetch('/remove_all_unclassified', {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                location.reload();
+            } else {
+                throw new Error('Failed to delete all terms');
+            }
+        } catch (error) {
+            console.error('Error deleting all terms:', error);
+            alert('Ошибка при удалении терминов');
+        }
+    }
+}
 </script>
 {% endblock %} 

@@ -379,3 +379,15 @@ class DatabaseManager:
         except Exception as e:
             logging.error(f"Error getting paginated dictionary entries: {e}")
             raise
+
+    def remove_all_unclassified_terms(self) -> bool:
+        """Удаляет все неклассифицированные термины из базы данных"""
+        try:
+            with self.SessionLocal() as db:
+                # Используем SQLAlchemy ORM вместо прямого SQL
+                db.query(UnclassifiedTerm).delete()
+                db.commit()
+                return True
+        except Exception as e:
+            logging.error(f"Error removing all unclassified terms: {e}")
+            return False

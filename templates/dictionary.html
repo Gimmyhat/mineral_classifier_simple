@@ -2,6 +2,10 @@
 
 {% block title %}Редактирование справочника{% endblock %}
 
+{% block head %}
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/js/all.min.js"></script>
+{% endblock %}
+
 {% block content %}
 <a href="/" class="nav-link">← Назад на главную</a>
 <div class="card">
@@ -31,8 +35,9 @@
                     <td>
                         <select class="form-control normalized-name" data-original="{{ entry.normalized_name }}">
                             <option value="{{ entry.normalized_name }}">{{ entry.normalized_name }}</option>
+                            {% set ns = namespace(found=false) %}
                             {% for name in options.normalized_names %}
-                                {% if name != entry.normalized_name %}
+                                {% if not ns.found and name != entry.normalized_name %}
                                 <option value="{{ name }}">{{ name }}</option>
                                 {% endif %}
                             {% endfor %}
@@ -87,7 +92,7 @@
                     </td>
                     <td class="actions-cell">
                         <div class="action-buttons">
-                            <button class="icon-button save-btn" title="Сохранить изменения" style="display: none;">
+                            <button class="icon-button save-btn" title="Сохранить изменения">
                                 <i class="fas fa-save"></i>
                             </button>
                             <button class="icon-button delete-btn" title="Удалить запись">
@@ -194,103 +199,114 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Отслеживаем изменения в полях
-    document.querySelectorAll('.form-control').forEach(input => {
-        input.addEventListener('change', function() {
-            const row = this.closest('tr');
-            row.classList.add('modified');
-            row.querySelector('.save-btn').style.display = 'inline-flex';
+    const tableBody = document.querySelector('.result-table tbody');
 
-            // Обработка выбора "Добавить новое"
-            if (this.value === '__new__') {
-                const newInput = this.nextElementSibling;
-                this.style.display = 'none';
+    // Скрываем все кнопки сохранения при загрузке
+    document.querySelectorAll('.save-btn').forEach(btn => {
+        btn.style.display = 'none';
+    });
+
+    // Единый обработчик для всех form-control
+    tableBody.addEventListener('change', function(e) {
+        if (e.target.classList.contains('form-control')) {
+            const row = e.target.closest('tr');
+            row.classList.add('modified');
+            const saveBtn = row.querySelector('.save-btn');
+            if (saveBtn) {
+                saveBtn.style.display = 'inline-flex';
+            }
+
+            if (e.target.value === '__new__') {
+                const newInput = e.target.nextElementSibling;
+                e.target.style.display = 'none';
                 newInput.style.display = 'block';
                 newInput.focus();
             }
-        });
+        }
     });
 
-    // Обработка новых полей ввода
-    document.querySelectorAll('.new-name-input, .new-gbz-input, .new-group-input').forEach(input => {
-        input.addEventListener('blur', function() {
-            const select = this.previousElementSibling;
-            if (this.value.trim()) {
-                // Добавляем новое значение в select
+    // Единый обработчик для новых полей ввода
+    tableBody.addEventListener('blur', function(e) {
+        if (e.target.matches('.new-name-input, .new-gbz-input, .new-group-input')) {
+            const select = e.target.previousElementSibling;
+            if (e.target.value.trim()) {
                 const option = document.createElement('option');
-                option.value = this.value;
-                option.text = this.value;
+                option.value = e.target.value;
+                option.text = e.target.value;
                 select.add(option, 1);
-                select.value = this.value;
+                select.value = e.target.value;
             } else {
                 select.value = select.querySelector('option').value;
             }
             select.style.display = 'block';
-            this.style.display = 'none';
-        });
+            e.target.style.display = 'none';
+        }
     });
 
-    // Сохранение изменений
-    document.querySelectorAll('.save-btn').forEach(btn => {
-        btn.addEventListener('click', async function() {
-            const row = this.closest('tr');
-            const data = {
-                unique_key: row.id.replace('row-', ''),
-                normalized_name: row.querySelector('.normalized-name').value,
-                gbz_name: row.querySelector('.gbz-name').value,
-                group_name: row.querySelector('.group-name').value,
-                measurement_unit: row.querySelector('.measurement-unit').value,
-                measurement_unit_alt: row.querySelector('.measurement-unit-alt').value || ''
-            };
+    // Единый обработчик для кнопок
+    tableBody.addEventListener('click', async function(e) {
+        const btn = e.target.closest('button');
+        if (!btn) return;
 
-            try {
-                const response = await fetch('/update_dictionary_entry', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(data)
-                });
-
-                if (response.ok) {
-                    row.classList.remove('modified');
-                    this.style.display = 'none';
-                    alert('Изменения сохранены');
-                } else {
-                    throw new Error('Failed to update entry');
-                }
-            } catch (error) {
-                console.error('Error updating entry:', error);
-                alert('Ошибка при сохранении изменений');
-            }
-        });
-    });
-
-    // Удаление записи
-    document.querySelectorAll('.delete-btn').forEach(btn => {
-        btn.addEventListener('click', async function() {
-            if (confirm('Вы уверены, что хотите удалить эту запись?')) {
-                const row = this.closest('tr');
-                const uniqueKey = row.id.replace('row-', '');
-
-                try {
-                    const response = await fetch(`/delete_dictionary_entry/${encodeURIComponent(uniqueKey)}`, {
-                        method: 'DELETE'
-                    });
-
-                    if (response.ok) {
-                        row.remove();
-                    } else {
-                        throw new Error('Failed to delete entry');
-                    }
-                } catch (error) {
-                    console.error('Error deleting entry:', error);
-                    alert('Ошибка при удалении записи');
-                }
-            }
-        });
+        const row = btn.closest('tr');
+        
+        if (btn.classList.contains('save-btn')) {
+            await handleSave(row);
+        } else if (btn.classList.contains('delete-btn')) {
+            await handleDelete(row);
+        }
     });
 });
+
+async function handleSave(row) {
+    const data = {
+        unique_key: row.id.replace('row-', ''),
+        normalized_name: row.querySelector('.normalized-name').value,
+        gbz_name: row.querySelector('.gbz-name').value,
+        group_name: row.querySelector('.group-name').value,
+        measurement_unit: row.querySelector('.measurement-unit').value,
+        measurement_unit_alt: row.querySelector('.measurement-unit-alt').value || ''
+    };
+
+    try {
+        const response = await fetch('/update_dictionary_entry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+            row.classList.remove('modified');
+            row.querySelector('.save-btn').style.display = 'none';
+            alert('Изменения сохранены');
+        } else {
+            throw new Error('Failed to update entry');
+        }
+    } catch (error) {
+        console.error('Error updating entry:', error);
+        alert('Ошибка при сохранении изменений');
+    }
+}
+
+async function handleDelete(row) {
+    if (!confirm('Вы уверены, что хотите удалить эту запись?')) return;
+
+    const uniqueKey = row.id.replace('row-', '');
+    try {
+        const response = await fetch(`/delete_dictionary_entry/${encodeURIComponent(uniqueKey)}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            row.remove();
+        } else {
+            throw new Error('Failed to delete entry');
+        }
+    } catch (error) {
+        console.error('Error deleting entry:', error);
+        alert('Ошибка при удалении записи');
+    }
+}
 
 // Функция экспорта справочника
 async function exportDictionary() {
