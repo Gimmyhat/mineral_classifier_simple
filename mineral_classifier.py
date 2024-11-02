@@ -2,7 +2,6 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List, Set, Union
 from database import DatabaseManager
-from split_dictionary import DictionarySplitter
 from text_cleaner import TextCleaner
 from morphology_processor import MorphologyProcessor
 import pandas as pd
@@ -12,17 +11,18 @@ class MineralClassifier:
     def __init__(self, file_path):
         try:
             self.db = DatabaseManager()
-            self.dictionary_splitter = DictionarySplitter(file_path)
+            # Удалить эти строки:
+            # self.dictionary_splitter = DictionarySplitter(file_path)
             
-            # Проверяем наличие файлов словарей
-            dict_path = Path('data/dictionary.xlsx')
-            var_path = Path('data/variations.xlsx')
+            # Удалить проверку файлов словарей:
+            # dict_path = Path('data/dictionary.xlsx')
+            # var_path = Path('data/variations.xlsx')
             
-            if not dict_path.exists() or not var_path.exists():
-                self.dictionary_splitter.process_file()
-                self.dictionary_splitter.save_files()
-            else:
-                self.dictionary_splitter.process_file()
+            # if not dict_path.exists() or not var_path.exists():
+            #     self.dictionary_splitter.process_file()
+            #     self.dictionary_splitter.save_files()
+            # else:
+            #     self.dictionary_splitter.process_file()
             
             # Инициализируем обработчики
             self.text_cleaner = TextCleaner()
@@ -31,7 +31,8 @@ class MineralClassifier:
             # Инициализируем BatchProcessor
             self.batch_processor = BatchProcessor(self)
             
-            logging.debug(f"Initialized with {len(self.dictionary_splitter.known_minerals)} known minerals")
+            # Изменить лог:
+            logging.debug("MineralClassifier initialized successfully")
             
         except Exception as e:
             logging.error(f"Error initializing classifier: {str(e)}")
@@ -103,7 +104,7 @@ class MineralClassifier:
             full_context = ', '.join(contexts)
             variants.append(f"{main_term} ({full_context})")
         
-        # Обрабатываем составные те��мины
+        # Обрабатываем составные темины
         components = self.morphology_processor.split_compound_word(main_term)
         variants.extend(components)
         
@@ -150,37 +151,45 @@ class BatchProcessor:
         result['original_name'] = mineral
         return result
 
-    def process_excel(self, input_file: str, output_file: str = None, interactive: bool = False) -> str:
-        """
-        Обрабатывает входной Excel файл.
-        """
+    def process_excel(self, input_file: str, output_file: str = None) -> str:
+        """Обрабатывает входной Excel файл."""
         try:
             logging.debug(f"Starting processing of file: {input_file}")
-            df_input = pd.read_excel(
-                input_file,
-                usecols=[0],
-                engine='openpyxl'
-            )
-
+            df_input = pd.read_excel(input_file, usecols=[0])
+            
             if df_input.empty:
                 raise ValueError("Input file is empty")
 
             minerals = df_input.iloc[:, 0].tolist()
-            total_minerals = len(minerals)
-            logging.debug(f"Total minerals to process: {total_minerals}")
+            total_records = len(minerals)
+            logging.debug(f"Total minerals to process: {total_records}")
 
             # Обрабатываем минералы
             all_results = []
+            from main import processing_progress
+            
             for i, mineral in enumerate(minerals, 1):
                 result = self._process_mineral(mineral)
                 if result:
                     all_results.append(result)
+
+                # Обновляем прогресс
+                if hasattr(self, 'process_id'):
+                    current_progress = int((i / total_records) * 100)
+                    processing_progress[self.process_id] = {
+                        'current': i,
+                        'total': total_records,
+                        'progress': current_progress,
+                        'status': f'Обработано {i} из {total_records} записей'
+                    }
+                    logging.debug(f"Progress updated: {current_progress}%")
+
                 if i % 10 == 0:  # Логируем каждые 10 минералов
-                    logging.debug(f"Processed {i}/{total_minerals} minerals")
+                    logging.debug(f"Processed {i}/{total_records} minerals")
 
-            logging.debug("Creating DataFrame with results")
+            # Создаем DataFrame с результатами
             df_results = pd.DataFrame(all_results)
-
+            
             columns_order = [
                 'original_name',
                 'normalized_name_for_display',
@@ -204,16 +213,12 @@ class BatchProcessor:
                 if result['normalized_name_for_display'] == 'неизвестно':
                     self.learner.add_unclassified_term(result['original_name'])
 
-            # Если включен интерактивный режим, сохраняем неклассифицированные термины
-            if interactive and self.learner.get_unclassified_terms():
-                unclassified_file = f"{output_file.rsplit('.', 1)[0]}_unclassified.xlsx"
-                self.learner.export_unclassified(unclassified_file)
-                logging.info(f"Exported unclassified terms to: {unclassified_file}")
-
             return output_file
 
         except Exception as e:
             logging.error(f"Error processing file: {str(e)}")
+            if hasattr(self, 'process_id'):
+                processing_progress[self.process_id]['status'] = f'Ошибка: {str(e)}'
             raise
 
     def get_unclassified_terms(self) -> List[str]:

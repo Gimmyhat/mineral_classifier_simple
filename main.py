@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
-from typing import List
+from typing import Dict, Optional
 import uvicorn
 import logging
 import os
@@ -16,10 +16,10 @@ import shutil
 import pandas as pd
 from pathlib import Path
 from datetime import datetime, timedelta
-from collections import defaultdict
 import asyncio
 import uuid
-from functools import lru_cache
+from functools import lru_cache, wraps
+from time import time
 from database import DatabaseManager
 
 logging.basicConfig(level=logging.DEBUG)
@@ -34,7 +34,7 @@ results_dir.mkdir(exist_ok=True)
 # Определяем lifespan ДО создания приложения
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Контекстный менеджер жизненного цикла приложения"""
+    """Контекстный енеджер жизненного цикла приложения"""
     # Код инициализации при запуске
     cleanup_old_results(results_dir)
     asyncio.create_task(cleanup_old_tasks())
@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
 # ПОСЛЕ определения lifespan создаем приложение
 app = FastAPI(
     title="Mineral Classifier API",
-    description="API для классификации полезных ископаемых",
+    description="API для классификации олезных ископаемых",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -128,23 +128,10 @@ processing_tasks = {}
 
 
 class ProcessingStatus:
-    def __init__(self, total):
-        self.total = total
-        self.processed = 0
-        self.status = 'processing'
-        self.output_file = None
-
-
-class MineralInput(BaseModel):
-    name: str
-
-
-class MineralBatchInput(BaseModel):
-    minerals: List[str]
-
-
-class MineralRequest(BaseModel):
-    mineral_name: str
+    def __init__(self, total_records: int):
+        self.total = total_records  # Общее количество записей
+        self.processed = 0  # Обработано записей
+        self.status = 'processing'  # Статус обработки
 
 
 @app.get("/", response_class=HTMLResponse, tags=["Pages"])
@@ -186,7 +173,7 @@ async def process_file(file: UploadFile = File(...)):
         processing_id = str(uuid.uuid4())
         processing_tasks[processing_id] = ProcessingStatus(total_rows)
 
-        # Запускаем с обработкой ошибок
+        # Запускаем с обраоткой ошибок
         task = asyncio.create_task(process_file_background(processing_id, input_path, temp_dir))
         task.add_done_callback(lambda t: logging.error(f"Task failed: {t.exception()}") if t.exception() else None)
 
@@ -290,52 +277,6 @@ async def download_result(processing_id: str):
     )
 
 
-@app.post("/classify", tags=["Classification"])
-async def classify_mineral(request: MineralRequest):
-    try:
-        classifier = get_classifier()
-        logging.debug(f"Received request for mineral: {request.mineral_name}")
-        result = classifier.classify_mineral(request.mineral_name)
-        result = {k: str(v) for k, v in result.items()}
-        logging.debug(f"Classification result: {result}")
-        return result
-    except Exception as e:
-        logging.error(f"Error during classification: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/classify_batch", tags=["Classification"])
-async def classify_batch(minerals: MineralBatchInput):
-    """
-    Классифицирует список минералов
-
-    - **minerals**: Список названий минералов для классификации
-    """
-    logging.debug(f"Received batch request for minerals: {minerals.minerals}")
-    results = [classifier.classify_mineral(mineral) for mineral in minerals.minerals]
-    return results
-
-
-@app.post("/classify_form", response_class=HTMLResponse, tags=["Classification"])
-async def classify_form(request: Request, mineral_name: str = Form(...)):
-    """
-    Классифицирует минерал через веб-форму
-    """
-    try:
-        result = classifier.classify_mineral(mineral_name)
-        return templates.TemplateResponse(
-            "result.html",
-            {
-                "request": request,
-                "result": result,
-                "mineral_name": mineral_name
-            }
-        )
-    except Exception as e:
-        logging.error(f"Error classifying mineral: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 def cleanup_old_results(directory: Path, max_age_hours: int = 24):
     """Удаляет файлы результатов старше указного возраста"""
     try:
@@ -400,16 +341,38 @@ class ClassificationInput(BaseModel):
     measurement_unit: str
     measurement_unit_alt: str = ""
 
+def timed_lru_cache(seconds: int, maxsize: int = 128):
+    def wrapper_decorator(func):
+        func = lru_cache(maxsize=maxsize)(func)
+        func.lifetime = seconds
+        func.expiration = time() + seconds
+
+        @wraps(func)
+        def wrapped_func(*args, **kwargs):
+            if time() > func.expiration:
+                func.cache_clear()
+                func.expiration = time() + func.lifetime
+            return func(*args, **kwargs)
+
+        wrapped_func.cache_info = func.cache_info
+        wrapped_func.cache_clear = func.cache_clear
+        return wrapped_func
+
+    return wrapper_decorator
+
 @app.get("/unclassified", response_class=HTMLResponse, tags=["Interactive Classification"])
 async def show_unclassified(request: Request):
-    """Показывает страницу с неклассифицированными терминами"""
+    """Показывает ст��аницу с неклассифицированными терминами"""
     try:
+        # Используем кастомный декоратор для кэширования
+        @timed_lru_cache(seconds=300, maxsize=1)  # кэш на 5 инут
+        def get_cached_options():
+            batch_processor = get_batch_processor()
+            return batch_processor.get_classification_options()
+
         batch_processor = get_batch_processor()
         terms = batch_processor.get_unclassified_terms()
-        options = batch_processor.get_classification_options()
-        
-        logging.debug(f"Unclassified terms: {terms}")
-        logging.debug(f"Classification options: {options}")
+        options = get_cached_options()
         
         return templates.TemplateResponse(
             "unclassified.html",
@@ -468,7 +431,7 @@ async def add_classification(classification: ClassificationInput):
 
 @app.get("/suggest_classification/{term}", tags=["Interactive Classification"])
 async def suggest_classification(term: str):
-    """Предлагает классификацию для термина"""
+    """Предлагает классификацию для темина"""
     try:
         batch_processor = get_batch_processor()
         suggestion = batch_processor.learner.suggest_classification(term)
@@ -492,6 +455,169 @@ async def remove_unclassified(term: str):
     except Exception as e:
         logging.error(f"Error removing unclassified term: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/dictionary", response_class=HTMLResponse, tags=["Dictionary Management"])
+async def show_dictionary(request: Request):
+    """Показывает страницу редактирования справочника"""
+    try:
+        db_manager = DatabaseManager()
+        entries = db_manager.get_dictionary_entries()
+        options = db_manager.get_classification_options()
+        
+        return templates.TemplateResponse(
+            "dictionary.html",
+            {
+                "request": request,
+                "entries": entries,
+                "options": options
+            }
+        )
+    except Exception as e:
+        logging.error(f"Error showing dictionary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update_dictionary_entry", tags=["Dictionary Management"])
+async def update_dictionary_entry(entry: ClassificationInput):
+    """Обновляет запись в справочнике"""
+    try:
+        db_manager = DatabaseManager()
+        success = db_manager.update_dictionary_entry(entry.dict())
+        if success:
+            return {"status": "success", "message": "Entry updated successfully"}
+        raise HTTPException(status_code=400, detail="Failed to update entry")
+    except Exception as e:
+        logging.error(f"Error updating dictionary entry: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete_dictionary_entry/{unique_key}", tags=["Dictionary Management"])
+async def delete_dictionary_entry(unique_key: str):
+    """Удаляет запись из справочника"""
+    try:
+        db_manager = DatabaseManager()
+        success = db_manager.delete_dictionary_entry(unique_key)
+        if success:
+            return {"status": "success", "message": "Entry deleted successfully"}
+        raise HTTPException(status_code=400, detail="Failed to delete entry")
+    except Exception as e:
+        logging.error(f"Error deleting dictionary entry: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/export_dictionary", tags=["Dictionary Management"])
+async def export_dictionary():
+    """Экспортирует справочник в Excel"""
+    try:
+        db_manager = DatabaseManager()
+        filename = "dictionary_export.xlsx"
+        filepath = db_manager.export_dictionary(filename)
+        return FileResponse(
+            filepath,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=filename
+        )
+    except Exception as e:
+        logging.error(f"Error exporting dictionary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Глобальная переменная для хранения прогресса
+upload_progress = {}
+
+@app.post("/upload", tags=["File Processing"])
+async def upload_file(file: UploadFile = File(...)):
+    """Загрузка и обработка Excel файла"""
+    process_id = str(uuid.uuid4())
+    try:
+        # Создаем временную директорию для файла
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir) / file.filename
+            
+            # Сохраняем загруженный файл
+            with temp_path.open("wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            
+            # Читаем файл для подсчета записей
+            df = pd.read_excel(str(temp_path))
+            total_records = len(df)
+            
+            # Создаем имя для выходного файла
+            output_filename = f"classified_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            output_path = results_dir / output_filename
+            
+            # Инициализируем прогресс
+            processing_progress[process_id] = {
+                'current': 0,
+                'total': total_records,
+                'status': 'Начало обработки...'
+            }
+            
+            # Обрабатываем файл
+            batch_processor = get_batch_processor()
+            batch_processor.process_id = process_id  # Передаем ID процесса
+            
+            result_path = batch_processor.process_excel(str(temp_path), str(output_path))
+            
+            return {
+                "status": "success",
+                "message": "File processed successfully",
+                "result_file": output_filename,
+                "process_id": process_id
+            }
+            
+    except Exception as e:
+        logging.error(f"Error processing file: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/upload/progress/{process_id}")
+async def get_progress(process_id: str):
+    """Получение прогресса обработки"""
+    if process_id in processing_progress:
+        progress = processing_progress[process_id]
+        percent = int((progress['current'] / progress['total']) * 100) if progress['total'] > 0 else 0
+        return {
+            "progress": percent,
+            "status": f"Обработано {progress['current']} из {progress['total']} записей"
+        }
+    raise HTTPException(status_code=404, detail="Process not found")
+
+@app.get('/upload/progress')
+async def progress(request: Request):
+    """Отправка обновлений о прогрессе через SSE"""
+    async def event_generator():
+        while True:
+            try:
+                # Получаем последний процесс
+                if processing_progress:
+                    latest_process = list(processing_progress.values())[-1]
+                    current = latest_process['current']
+                    total = latest_process['total']
+                    
+                    # Вычисляем процент
+                    progress = int((current / total) * 100) if total > 0 else 0
+                    
+                    yield {
+                        "data": {
+                            "progress": progress,
+                            "status": f"Обработано {current} из {total} з��писей"
+                        }
+                    }
+                    
+                    # Если обработка завершена, завершаем генератор
+                    if current >= total:
+                        break
+                
+                # Пауза между обновлениями
+                await asyncio.sleep(0.1)
+                
+            except Exception as e:
+                logging.error(f"Error in event generator: {e}")
+                yield {
+                    "data": {
+                        "progress": 0,
+                        "status": f"Ошибка: {str(e)}"
+                    }
+                }
+                break
+
+    return EventSourceResponse(event_generator())
 
 
 if __name__ == "__main__":
