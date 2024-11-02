@@ -5,9 +5,22 @@
 {% block content %}
 <h1>Mineral Classifier</h1>
 <div class="nav-links">
-    <a href="/upload">Загрузить Excel файл</a>
-    <a href="/unclassified">Неклассифицированные термины</a>
-    <a href="/docs">API Documentation</a>
+    <a href="/upload" class="nav-button">
+        <i class="fas fa-file-upload"></i>
+        Загрузить Excel файл
+    </a>
+    <a href="/unclassified" class="nav-button">
+        <i class="fas fa-list"></i>
+        Неклассифицированные термины
+    </a>
+    <a href="/dictionary" class="nav-button">
+        <i class="fas fa-book"></i>
+        Редактировать справочник
+    </a>
+    <a href="/docs" class="nav-button">
+        <i class="fas fa-file-alt"></i>
+        API Documentation
+    </a>
 </div>
 
 <div class="card">
@@ -19,7 +32,9 @@
                    placeholder="Введите название минерала"
                    required
                    class="form-control">
-            <button type="submit" class="button">Классифицировать</button>
+            <button type="submit" class="icon-button search-btn" title="Классифицировать">
+                <i class="fas fa-search"></i>
+            </button>
         </div>
     </form>
     <div id="result" class="result-card" style="display: none;">
@@ -169,6 +184,61 @@
     .result-card {
         margin-top: 15px; /* Уменьшили с 20px */
         padding: 0 10px; /* Уменьшили с 15px */
+    }
+
+    .nav-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 24px;
+        background-color: var(--primary-color);
+        color: white;
+        text-decoration: none;
+        border-radius: var(--border-radius);
+        transition: all 0.3s ease;
+    }
+
+    .nav-button:hover {
+        background-color: var(--primary-color-dark);
+        transform: translateY(-2px);
+    }
+
+    .button {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        background-color: var(--primary-color);
+    }
+
+    .input-group {
+        display: flex;
+        gap: 10px;
+        width: 100%;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .search-btn {
+        background-color: var(--primary-color);
+        color: white;
+        width: 40px;
+        height: 40px;
+        border-radius: var(--border-radius);
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.3s ease;
+    }
+
+    .search-btn:hover {
+        background-color: var(--primary-color-dark);
+        transform: translateY(-2px);
+    }
+
+    .search-btn i {
+        font-size: 1.2rem;
     }
 </style>
 

@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+
+{% block title %}Редактирование справочника{% endblock %}
+
+{% block content %}
+<a href="/" class="nav-link">← Назад на главную</a>
+<div class="card">
+    <div class="header-actions">
+        <h2>Редактирование справочника</h2>
+        <button class="button" onclick="exportDictionary()">
+            <i class="fas fa-file-export"></i>
+            Экспорт в Excel
+        </button>
+    </div>
+
+    <div class="table-container">
+        <table class="result-table">
+            <thead>
+                <tr>
+                    <th>Нормализованное название</th>
+                    <th>Название ГБЗ/ТБЗ</th>
+                    <th>Группа недр</th>
+                    <th>Ед. изм.</th>
+                    <th>Альт. ед. изм.</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in entries %}
+                <tr id="row-{{ entry.unique_key }}" class="dictionary-row">
+                    <td>
+                        <select class="form-control normalized-name" data-original="{{ entry.normalized_name }}">
+                            <option value="{{ entry.normalized_name }}">{{ entry.normalized_name }}</option>
+                            {% for name in options.normalized_names %}
+                                {% if name != entry.normalized_name %}
+                                <option value="{{ name }}">{{ name }}</option>
+                                {% endif %}
+                            {% endfor %}
+                            <option value="__new__">+ Добавить новое</option>
+                        </select>
+                        <input type="text" class="form-control new-name-input" style="display: none;">
+                    </td>
+                    <td>
+                        <select class="form-control gbz-name">
+                            <option value="{{ entry.gbz_name }}">{{ entry.gbz_name }}</option>
+                            {% for name in options.gbz_names %}
+                                {% if name != entry.gbz_name %}
+                                <option value="{{ name }}">{{ name }}</option>
+                                {% endif %}
+                            {% endfor %}
+                            <option value="__new__">+ Добавить новое</option>
+                        </select>
+                        <input type="text" class="form-control new-gbz-input" style="display: none;">
+                    </td>
+                    <td>
+                        <select class="form-control group-name">
+                            <option value="{{ entry.group_name }}">{{ entry.group_name }}</option>
+                            {% for group in options.groups %}
+                                {% if group != entry.group_name %}
+                                <option value="{{ group }}">{{ group }}</option>
+                                {% endif %}
+                            {% endfor %}
+                            <option value="__new__">+ Добавить новое</option>
+                        </select>
+                        <input type="text" class="form-control new-group-input" style="display: none;">
+                    </td>
+                    <td>
+                        <select class="form-control measurement-unit">
+                            <option value="{{ entry.measurement_unit }}">{{ entry.measurement_unit }}</option>
+                            {% for unit in options.measurement_units %}
+                                {% if unit != entry.measurement_unit %}
+                                <option value="{{ unit }}">{{ unit }}</option>
+                                {% endif %}
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td>
+                        <select class="form-control measurement-unit-alt">
+                            <option value="{{ entry.measurement_unit_alt }}">{{ entry.measurement_unit_alt }}</option>
+                            {% for unit in options.measurement_units %}
+                                {% if unit != entry.measurement_unit_alt %}
+                                <option value="{{ unit }}">{{ unit }}</option>
+                                {% endif %}
+                            {% endfor %}
+                            <option value="">Нет</option>
+                        </select>
+                    </td>
+                    <td class="actions-cell">
+                        <div class="action-buttons">
+                            <button class="icon-button save-btn" title="Сохранить изменения" style="display: none;">
+                                <i class="fas fa-save"></i>
+                            </button>
+                            <button class="icon-button delete-btn" title="Удалить запись">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+    .header-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .export-btn {
+        background-color: var(--secondary-color);
+    }
+
+    .table-container {
+        overflow-x: auto;
+    }
+
+    .result-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+    }
+
+    .result-table th {
+        background-color: var(--primary-color);
+        color: white;
+        padding: 10px;
+        text-align: left;
+        font-weight: 500;
+    }
+
+    .result-table td {
+        padding: 8px;
+        border-bottom: 1px solid #eee;
+        vertical-align: middle;
+    }
+
+    .form-control {
+        width: 100%;
+        padding: 6px 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+    .form-control:focus {
+        border-color: var(--primary-color);
+        outline: none;
+    }
+
+    .icon-button {
+        padding: 6px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+    }
+
+    .save-btn {
+        background-color: var(--primary-color);
+        color: white;
+    }
+
+    .delete-btn {
+        background-color: #dc3545;
+        color: white;
+    }
+
+    .modified {
+        background-color: #fff3cd;
+    }
+
+    /* Стили для новых полей ввода */
+    .new-name-input,
+    .new-gbz-input,
+    .new-group-input {
+        margin-top: 5px;
+    }
+
+    @media (max-width: 1200px) {
+        .form-control {
+            min-width: 120px;
+        }
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Отслеживаем изменения в полях
+    document.querySelectorAll('.form-control').forEach(input => {
+        input.addEventListener('change', function() {
+            const row = this.closest('tr');
+            row.classList.add('modified');
+            row.querySelector('.save-btn').style.display = 'inline-flex';
+
+            // Обработка выбора "Добавить новое"
+            if (this.value === '__new__') {
+                const newInput = this.nextElementSibling;
+                this.style.display = 'none';
+                newInput.style.display = 'block';
+                newInput.focus();
+            }
+        });
+    });
+
+    // Обработка новых полей ввода
+    document.querySelectorAll('.new-name-input, .new-gbz-input, .new-group-input').forEach(input => {
+        input.addEventListener('blur', function() {
+            const select = this.previousElementSibling;
+            if (this.value.trim()) {
+                // Добавляем новое значение в select
+                const option = document.createElement('option');
+                option.value = this.value;
+                option.text = this.value;
+                select.add(option, 1);
+                select.value = this.value;
+            } else {
+                select.value = select.querySelector('option').value;
+            }
+            select.style.display = 'block';
+            this.style.display = 'none';
+        });
+    });
+
+    // Сохранение изменений
+    document.querySelectorAll('.save-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const row = this.closest('tr');
+            const data = {
+                unique_key: row.id.replace('row-', ''),
+                normalized_name: row.querySelector('.normalized-name').value,
+                gbz_name: row.querySelector('.gbz-name').value,
+                group_name: row.querySelector('.group-name').value,
+                measurement_unit: row.querySelector('.measurement-unit').value,
+                measurement_unit_alt: row.querySelector('.measurement-unit-alt').value || ''
+            };
+
+            try {
+                const response = await fetch('/update_dictionary_entry', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    row.classList.remove('modified');
+                    this.style.display = 'none';
+                    alert('Изменения сохранены');
+                } else {
+                    throw new Error('Failed to update entry');
+                }
+            } catch (error) {
+                console.error('Error updating entry:', error);
+                alert('Ошибка при сохранении изменений');
+            }
+        });
+    });
+
+    // Удаление записи
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            if (confirm('Вы уверены, что хотите удалить эту запись?')) {
+                const row = this.closest('tr');
+                const uniqueKey = row.id.replace('row-', '');
+
+                try {
+                    const response = await fetch(`/delete_dictionary_entry/${encodeURIComponent(uniqueKey)}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (response.ok) {
+                        row.remove();
+                    } else {
+                        throw new Error('Failed to delete entry');
+                    }
+                } catch (error) {
+                    console.error('Error deleting entry:', error);
+                    alert('Ошибка при удалении записи');
+                }
+            }
+        });
+    });
+});
+
+// Функция экспорта справочника
+async function exportDictionary() {
+    try {
+        window.location.href = '/export_dictionary';
+    } catch (error) {
+        console.error('Error exporting dictionary:', error);
+        alert('Ошибка при экспорте справочника');
+    }
+}
+</script>
+{% endblock %} 

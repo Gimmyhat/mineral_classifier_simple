@@ -362,7 +362,7 @@ def timed_lru_cache(seconds: int, maxsize: int = 128):
 
 @app.get("/unclassified", response_class=HTMLResponse, tags=["Interactive Classification"])
 async def show_unclassified(request: Request):
-    """Показывает ст��аницу с неклассифицированными терминами"""
+    """Показывает станицу с неклассифицированными терминами"""
     try:
         # Используем кастомный декоратор для кэширования
         @timed_lru_cache(seconds=300, maxsize=1)  # кэш на 5 инут
@@ -596,7 +596,7 @@ async def progress(request: Request):
                     yield {
                         "data": {
                             "progress": progress,
-                            "status": f"Обработано {current} из {total} з��писей"
+                            "status": f"Обработано {current} из {total} записей"
                         }
                     }
                     

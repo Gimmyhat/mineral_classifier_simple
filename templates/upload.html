@@ -6,10 +6,11 @@
 <a href="/" class="nav-link">← Назад на главную</a>
 <h1>Загрузка Excel файла для классификации</h1>
 
-<div class="card">
+<div class="upload-card">
     <form action="/process_file" method="post" enctype="multipart/form-data" id="uploadForm">
         <div class="file-upload">
-            <label for="fileInput" class="file-upload-label">
+            <label for="fileInput" class="button">
+                <i class="fas fa-file-excel"></i>
                 <span id="fileNameDisplay">Выберите Excel файл</span>
                 <input type="file"
                        id="fileInput"
@@ -21,20 +22,22 @@
             </label>
         </div>
     </form>
+
     <div id="progressContainer" style="display: none;">
-        <div class="progress-bar">
-            <div class="progress-fill"></div>
+        <div class="upload-progress-bar">
+            <div class="upload-progress-fill"></div>
         </div>
-        <div class="progress-info">
+        <div class="upload-progress-info">
             <span id="progressText">0%</span>
             <span id="progressDetails">Обработано 0 из 0 записей</span>
         </div>
-        <div id="loadingMessage" class="success-message">Обработка файла...</div>
+        <div id="loadingMessage" class="upload-success-message">Обработка файла...</div>
     </div>
-    <div id="errorMessage" class="error-message" style="display: none;"></div>
+
+    <div id="errorMessage" class="upload-error-message" style="display: none;"></div>
 </div>
 
-<div class="card">
+<div class="upload-card">
     <h2>Инструкция</h2>
     <ol>
         <li>Подготовьте Excel файл со списком минералов в первой колонке</li>
@@ -45,46 +48,91 @@
 </div>
 
 <style>
+    .upload-card {
+        background-color: white;
+        border-radius: var(--border-radius);
+        padding: 20px;
+        margin: 20px 0;
+        box-shadow: var(--box-shadow);
+    }
+
     .file-upload {
-        text-align: center; /* Центрируем содержимое */
+        text-align: center;
         margin: 20px 0;
     }
 
-    .file-upload-label {
-        display: inline-block;
+    .button {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
         padding: 12px 24px;
-        background-color: var(--secondary-color);
+        background-color: var(--primary-color);
         color: white;
         border-radius: var(--border-radius);
         cursor: pointer;
         transition: all 0.3s ease;
-        text-align: center;
-        min-width: 200px;
-        margin: 0 auto; /* Центрируем сам элемент */
+        border: none;
+        font-size: 1rem;
+        font-weight: 500;
     }
 
-    /* Добавляем стили для контейнера прогресса */
-    #progressContainer {
-        text-align: center;
-        max-width: 600px;
-        margin: 0 auto;
+    .button:hover {
+        background-color: var(--primary-color-dark);
+        transform: translateY(-2px);
     }
 
-    .progress-info {
+    .upload-progress-bar {
+        width: 100%;
+        height: 20px;
+        background-color: #f0f0f0;
+        border-radius: var(--border-radius);
+        overflow: hidden;
+        margin: 10px auto;
+    }
+
+    .upload-progress-fill {
+        width: 0%;
+        height: 100%;
+        background-color: var(--secondary-color);
+        transition: width 0.3s ease;
+    }
+
+    .upload-progress-info {
         display: flex;
-        justify-content: center; /* Центрируем информацию о прогрессе */
-        gap: 20px; /* Добавляем отступ между элементами */
+        justify-content: center;
+        gap: 20px;
         margin: 10px 0;
-        color: var(--primary-color);
+        color: var(--text-color);
         font-size: 0.9rem;
+        text-align: center;
     }
 
     #progressText {
         font-weight: bold;
     }
 
-    .progress-fill {
-        transition: width 0.3s ease;
+    .upload-success-message {
+        color: #27ae60;
+        margin: 10px 0;
+        font-weight: 500;
+    }
+
+    .upload-error-message {
+        color: #e74c3c;
+        margin: 10px 0;
+        font-weight: 500;
+    }
+
+    .progress-container {
+        width: 60%;
+        margin: 20px auto;
+        text-align: center;
+    }
+
+    @media (max-width: 768px) {
+        .progress-container {
+            width: 80%;
+        }
     }
 </style>
 
@@ -98,11 +146,11 @@ function updateProgress() {
     fetch(`/progress/${processingId}`)
         .then(response => response.json())
         .then(data => {
-            console.log('Progress data:', data); // Отладочный вывод
+            console.log('Progress data:', data);
 
             if (data.total > 0) {
                 const percent = Math.round((data.processed / data.total) * 100);
-                document.querySelector('.progress-fill').style.width = `${percent}%`;
+                document.querySelector('.upload-progress-fill').style.width = `${percent}%`;
                 document.getElementById('progressText').textContent = `${percent}%`;
                 document.getElementById('progressDetails').textContent =
                     `Обработано ${data.processed} из ${data.total} записей`;
@@ -112,7 +160,6 @@ function updateProgress() {
                 if (data.status === 'completed') {
                     clearInterval(progressInterval);
                     document.getElementById('loadingMessage').textContent = 'Обработка завершена!';
-                    // Добавляем небольшую задержку перед скачиванием
                     setTimeout(() => {
                         window.location.href = `/download/${processingId}`;
                         document.getElementById('progressContainer').style.display = 'none';
@@ -137,8 +184,7 @@ async function handleFileSelect(input) {
     document.getElementById('fileNameDisplay').textContent = fileName;
 
     if (input.files[0]) {
-        // Сбрасываем предыдущий прогресс
-        document.querySelector('.progress-fill').style.width = '0%';
+        document.querySelector('.upload-progress-fill').style.width = '0%';
         document.getElementById('progressText').textContent = '0%';
         document.getElementById('progressDetails').textContent = 'Подготовка к обработке...';
         document.getElementById('loadingMessage').textContent = 'Загрузка файла...';
@@ -148,7 +194,7 @@ async function handleFileSelect(input) {
         const formData = new FormData(document.getElementById('uploadForm'));
 
         try {
-            console.log('Sending file...'); // Отладочный вывод
+            console.log('Sending file...');
             const response = await fetch('/process_file', {
                 method: 'POST',
                 body: formData
@@ -159,16 +205,14 @@ async function handleFileSelect(input) {
             }
 
             const data = await response.json();
-            console.log('Received processing ID:', data); // Отладочный вывод
+            console.log('Received processing ID:', data);
 
             processingId = data.processing_id;
 
-            // Очищаем предыдущий интервал, если он существует
             if (progressInterval) {
                 clearInterval(progressInterval);
             }
 
-            // Запускаем обновление прогресса каждые 500мс
             progressInterval = setInterval(updateProgress, 500);
 
         } catch (error) {
@@ -180,7 +224,6 @@ async function handleFileSelect(input) {
     }
 }
 
-// Очистка интервала при уходе со страницы
 window.onbeforeunload = function() {
     if (progressInterval) {
         clearInterval(progressInterval);

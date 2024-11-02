@@ -6,6 +6,8 @@ from typing import List, Dict, Optional
 import json
 import time
 from sqlalchemy.exc import OperationalError
+import pandas as pd
+from pathlib import Path
 
 # Создаем базовый класс для моделей
 Base = declarative_base()
@@ -75,6 +77,15 @@ class DatabaseManager:
     def __init__(self):
         self.SessionLocal = SessionLocal
         Base.metadata.create_all(bind=engine)
+
+    def get_connection(self):
+        """Контекстный менеджер для соединения с базой данных"""
+        try:
+            conn = engine.connect()
+            return conn
+        except Exception as e:
+            logging.error(f"Error getting database connection: {e}")
+            raise
 
     def get_db(self):
         """Получение сессии базы данных"""
@@ -206,13 +217,19 @@ class DatabaseManager:
         """Получение доступных вариантов классификации"""
         try:
             with self.SessionLocal() as db:
-                entries = db.query(Dictionary).all()
+                # Используем один запрос вместо нескольких
+                result = db.query(
+                    Dictionary.normalized_name,
+                    Dictionary.gbz_name,
+                    Dictionary.group_name,
+                    Dictionary.measurement_unit
+                ).distinct().all()
                 
                 options = {
-                    'normalized_names': sorted(list(set(e.normalized_name for e in entries))),
-                    'gbz_names': sorted(list(set(e.gbz_name for e in entries))),
-                    'groups': sorted(list(set(e.group_name for e in entries))),
-                    'measurement_units': sorted(list(set(e.measurement_unit for e in entries)))
+                    'normalized_names': sorted(list(set(r[0] for r in result))),
+                    'gbz_names': sorted(list(set(r[1] for r in result))),
+                    'groups': sorted(list(set(r[2] for r in result))),
+                    'measurement_units': sorted(list(set(r[3] for r in result)))
                 }
                 
                 return options
@@ -247,3 +264,118 @@ class DatabaseManager:
         except Exception as e:
             logging.error(f"Database health check failed: {e}")
             return False
+
+    def get_dictionary_entries(self) -> List[Dict]:
+        """Получение всех записей справочника"""
+        try:
+            with self.SessionLocal() as db:
+                entries = db.query(Dictionary).all()
+                return [
+                    {
+                        'unique_key': entry.unique_key,
+                        'normalized_name': entry.normalized_name,
+                        'gbz_name': entry.gbz_name,
+                        'group_name': entry.group_name,
+                        'measurement_unit': entry.measurement_unit,
+                        'measurement_unit_alt': entry.measurement_unit_alt or ''
+                    }
+                    for entry in entries
+                ]
+        except Exception as e:
+            logging.error(f"Error getting dictionary entries: {e}")
+            return []
+
+    def update_dictionary_entry(self, entry_data: Dict) -> bool:
+        """Обновление записи в справочнике"""
+        try:
+            with self.SessionLocal() as db:
+                entry = db.query(Dictionary).filter_by(
+                    unique_key=entry_data['unique_key']
+                ).first()
+                
+                if entry:
+                    entry.normalized_name = entry_data['normalized_name']
+                    entry.gbz_name = entry_data['gbz_name']
+                    entry.group_name = entry_data['group_name']
+                    entry.measurement_unit = entry_data['measurement_unit']
+                    entry.measurement_unit_alt = entry_data.get('measurement_unit_alt', '')
+                    
+                    # Обновляем связанные вариации
+                    for variation in entry.variations:
+                        variation.dictionary_id = entry.id
+                    
+                    db.commit()
+                    return True
+                return False
+        except Exception as e:
+            logging.error(f"Error updating dictionary entry: {e}")
+            db.rollback()
+            return False
+
+    def delete_dictionary_entry(self, unique_key: str) -> bool:
+        """Удаление записи из справочника"""
+        try:
+            with self.SessionLocal() as db:
+                # Сначала удаляем все связанные вариации
+                entry = db.query(Dictionary).filter_by(unique_key=unique_key).first()
+                if entry:
+                    # SQLAlchemy автоматически удалит связанные вариации благодаря cascade
+                    db.delete(entry)
+                    db.commit()
+                    return True
+                return False
+        except Exception as e:
+            logging.error(f"Error deleting dictionary entry: {e}")
+            db.rollback()
+            return False
+
+    def export_dictionary(self, filename: str) -> str:
+        """Экспорт справочника в Excel"""
+        try:
+            entries = self.get_dictionary_entries()
+            df = pd.DataFrame(entries)
+            
+            # Создаем директорию для экспорта, если её нет
+            export_dir = Path('exports')
+            export_dir.mkdir(exist_ok=True)
+            
+            # Формируем путь к файлу
+            filepath = export_dir / filename
+            
+            # Сохраняем в Excel
+            df.to_excel(filepath, index=False)
+            
+            return str(filepath)
+        except Exception as e:
+            logging.error(f"Error exporting dictionary: {e}")
+            raise
+
+    def get_dictionary_entries_count(self) -> int:
+        """Возвращает общее количество записей в словаре"""
+        try:
+            with self.SessionLocal() as session:
+                return session.query(Dictionary).count()
+        except Exception as e:
+            logging.error(f"Error getting dictionary entries count: {e}")
+            raise
+
+    def get_dictionary_entries_paginated(self, page: int = 1, limit: int = 50) -> List[Dict]:
+        """Возвращает записи словаря с пагинацией"""
+        try:
+            offset = (page - 1) * limit
+            with self.SessionLocal() as session:
+                entries = session.query(Dictionary).order_by(Dictionary.normalized_name)\
+                    .offset(offset).limit(limit).all()
+                
+                return [{
+                    'id': entry.id,
+                    'term': entry.unique_key,
+                    'normalized_name': entry.normalized_name,
+                    'gbz_name': entry.gbz_name,
+                    'group_name': entry.group_name,
+                    'measurement_unit': entry.measurement_unit,
+                    'measurement_unit_alt': entry.measurement_unit_alt or ''
+                } for entry in entries]
+        except Exception as e:
+            logging.error(f"Error getting paginated dictionary entries: {e}")
+            raise
