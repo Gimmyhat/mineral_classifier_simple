@@ -40,17 +40,68 @@ def create_db_engine():
 engine = create_db_engine()
 SessionLocal = sessionmaker(bind=engine)
 
+# Новые таблицы для нормализованных данных
+class NormalizedName(Base):
+    """Справочник нормализованных названий"""
+    __tablename__ = "normalized_names"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False)
+    
+    # Связь с основным словарем
+    dictionary_entries = relationship("Dictionary", back_populates="normalized_name_ref")
+
+class GbzName(Base):
+    """Справочник названий ГБЗ"""
+    __tablename__ = "gbz_names"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False)
+    
+    # Связь с основным словарем
+    dictionary_entries = relationship("Dictionary", back_populates="gbz_name_ref")
+
+class GroupName(Base):
+    """Справочник групп недр"""
+    __tablename__ = "group_names"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False)
+    
+    # Связь с основным словарем
+    dictionary_entries = relationship("Dictionary", back_populates="group_name_ref")
+
+class MeasurementUnit(Base):
+    """Справочник единиц измерения"""
+    __tablename__ = "measurement_units"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False)
+    
+    # Связи с основным словарем
+    primary_units = relationship("Dictionary", foreign_keys="Dictionary.measurement_unit_id", back_populates="measurement_unit_ref")
+    alternative_units = relationship("Dictionary", foreign_keys="Dictionary.measurement_unit_alt_id", back_populates="measurement_unit_alt_ref")
+
 class Dictionary(Base):
     """Основной словарь"""
     __tablename__ = "dictionary"
 
     id = Column(Integer, primary_key=True)
     unique_key = Column(String, unique=True, index=True)
-    normalized_name = Column(String)
-    gbz_name = Column(String)
-    group_name = Column(String)
-    measurement_unit = Column(String)
-    measurement_unit_alt = Column(String)
+    
+    # Внешние ключи
+    normalized_name_id = Column(Integer, ForeignKey('normalized_names.id'), nullable=False)
+    gbz_name_id = Column(Integer, ForeignKey('gbz_names.id'), nullable=False)
+    group_name_id = Column(Integer, ForeignKey('group_names.id'), nullable=False)
+    measurement_unit_id = Column(Integer, ForeignKey('measurement_units.id'), nullable=False)
+    measurement_unit_alt_id = Column(Integer, ForeignKey('measurement_units.id'), nullable=True)
+    
+    # Связи с справочными таблицами
+    normalized_name_ref = relationship("NormalizedName", back_populates="dictionary_entries")
+    gbz_name_ref = relationship("GbzName", back_populates="dictionary_entries")
+    group_name_ref = relationship("GroupName", back_populates="dictionary_entries")
+    measurement_unit_ref = relationship("MeasurementUnit", foreign_keys=[measurement_unit_id], back_populates="primary_units")
+    measurement_unit_alt_ref = relationship("MeasurementUnit", foreign_keys=[measurement_unit_alt_id], back_populates="alternative_units")
     
     # Связь с вариациями
     variations = relationship("Variation", back_populates="dictionary_entry")
@@ -76,6 +127,13 @@ class UnclassifiedTerm(Base):
 class DatabaseManager:
     def __init__(self):
         self.SessionLocal = SessionLocal
+        self.Dictionary = Dictionary
+        self.NormalizedName = NormalizedName
+        self.GbzName = GbzName
+        self.GroupName = GroupName
+        self.MeasurementUnit = MeasurementUnit
+        self.Variation = Variation
+        self.UnclassifiedTerm = UnclassifiedTerm
         Base.metadata.create_all(bind=engine)
 
     def get_connection(self):
@@ -96,9 +154,23 @@ class DatabaseManager:
             db.close()
 
     def add_dictionary_entry(self, entry_data: Dict) -> Optional[Dictionary]:
-        """Добавление или обновление записи в основном словаре"""
+        """Добавление или обнов��ение записи в основном словаре"""
         try:
             with self.SessionLocal() as db:
+                # Получаем или создаем записи в справочных таблицах
+                normalized_name = self._get_or_create(db, NormalizedName, 
+                    name=entry_data['normalized_name'])
+                gbz_name = self._get_or_create(db, GbzName, 
+                    name=entry_data['gbz_name'])
+                group_name = self._get_or_create(db, GroupName, 
+                    name=entry_data['group_name'])
+                measurement_unit = self._get_or_create(db, MeasurementUnit, 
+                    name=entry_data['measurement_unit'])
+                measurement_unit_alt = None
+                if entry_data.get('measurement_unit_alt'):
+                    measurement_unit_alt = self._get_or_create(db, MeasurementUnit, 
+                        name=entry_data['measurement_unit_alt'])
+
                 # Проверяем существование записи
                 existing_entry = db.query(Dictionary).filter_by(
                     unique_key=entry_data['unique_key']
@@ -106,11 +178,11 @@ class DatabaseManager:
                 
                 if existing_entry:
                     # Обновляем существующую запись
-                    existing_entry.normalized_name = entry_data['normalized_name']
-                    existing_entry.gbz_name = entry_data['gbz_name']
-                    existing_entry.group_name = entry_data['group_name']
-                    existing_entry.measurement_unit = entry_data['measurement_unit']
-                    existing_entry.measurement_unit_alt = entry_data.get('measurement_unit_alt', '')
+                    existing_entry.normalized_name_id = normalized_name.id
+                    existing_entry.gbz_name_id = gbz_name.id
+                    existing_entry.group_name_id = group_name.id
+                    existing_entry.measurement_unit_id = measurement_unit.id
+                    existing_entry.measurement_unit_alt_id = measurement_unit_alt.id if measurement_unit_alt else None
                     db.commit()
                     db.refresh(existing_entry)
                     return existing_entry
@@ -118,11 +190,11 @@ class DatabaseManager:
                     # Создаем новую запись
                     dictionary_entry = Dictionary(
                         unique_key=entry_data['unique_key'],
-                        normalized_name=entry_data['normalized_name'],
-                        gbz_name=entry_data['gbz_name'],
-                        group_name=entry_data['group_name'],
-                        measurement_unit=entry_data['measurement_unit'],
-                        measurement_unit_alt=entry_data.get('measurement_unit_alt', '')
+                        normalized_name_id=normalized_name.id,
+                        gbz_name_id=gbz_name.id,
+                        group_name_id=group_name.id,
+                        measurement_unit_id=measurement_unit.id,
+                        measurement_unit_alt_id=measurement_unit_alt.id if measurement_unit_alt else None
                     )
                     db.add(dictionary_entry)
                     db.commit()
@@ -132,6 +204,15 @@ class DatabaseManager:
             logging.error(f"Error adding/updating dictionary entry: {e}")
             db.rollback()
             return None
+
+    def _get_or_create(self, session, model, **kwargs):
+        """Получает существующую запись или создает новую"""
+        instance = session.query(model).filter_by(**kwargs).first()
+        if not instance:
+            instance = model(**kwargs)
+            session.add(instance)
+            session.flush()
+        return instance
 
     def add_variation(self, variant: str, dictionary_id: int) -> Optional[Variation]:
         """Добавление или обновление вариации"""
@@ -174,11 +255,11 @@ class DatabaseManager:
                 if variation and variation.dictionary_entry:
                     entry = variation.dictionary_entry
                     return {
-                        'normalized_name_for_display': entry.normalized_name,
-                        'pi_name_gbz_tbz': entry.gbz_name,
-                        'pi_group_is_nedra': entry.group_name,
-                        'pi_measurement_unit': entry.measurement_unit,
-                        'pi_measurement_unit_alternative': entry.measurement_unit_alt
+                        'normalized_name_for_display': entry.normalized_name_ref.name,
+                        'pi_name_gbz_tbz': entry.gbz_name_ref.name,
+                        'pi_group_is_nedra': entry.group_name_ref.name,
+                        'pi_measurement_unit': entry.measurement_unit_ref.name,
+                        'pi_measurement_unit_alternative': entry.measurement_unit_alt_ref.name if entry.measurement_unit_alt_ref else ''
                     }
                 return None
         except Exception as e:
@@ -217,19 +298,16 @@ class DatabaseManager:
         """Получение доступных вариантов классификации"""
         try:
             with self.SessionLocal() as db:
-                # Используем один запрос вместо нескольких
-                result = db.query(
-                    Dictionary.normalized_name,
-                    Dictionary.gbz_name,
-                    Dictionary.group_name,
-                    Dictionary.measurement_unit
-                ).distinct().all()
+                normalized_names = db.query(NormalizedName.name).distinct().all()
+                gbz_names = db.query(GbzName.name).distinct().all()
+                group_names = db.query(GroupName.name).distinct().all()
+                measurement_units = db.query(MeasurementUnit.name).distinct().all()
                 
                 options = {
-                    'normalized_names': sorted(list(set(r[0] for r in result))),
-                    'gbz_names': sorted(list(set(r[1] for r in result))),
-                    'groups': sorted(list(set(r[2] for r in result))),
-                    'measurement_units': sorted(list(set(r[3] for r in result)))
+                    'normalized_names': sorted([r[0] for r in normalized_names]),
+                    'gbz_names': sorted([r[0] for r in gbz_names]),
+                    'groups': sorted([r[0] for r in group_names]),
+                    'measurement_units': sorted([r[0] for r in measurement_units])
                 }
                 
                 return options
@@ -273,11 +351,11 @@ class DatabaseManager:
                 return [
                     {
                         'unique_key': entry.unique_key,
-                        'normalized_name': entry.normalized_name,
-                        'gbz_name': entry.gbz_name,
-                        'group_name': entry.group_name,
-                        'measurement_unit': entry.measurement_unit,
-                        'measurement_unit_alt': entry.measurement_unit_alt or ''
+                        'normalized_name': entry.normalized_name_ref.name,
+                        'gbz_name': entry.gbz_name_ref.name,
+                        'group_name': entry.group_name_ref.name,
+                        'measurement_unit': entry.measurement_unit_ref.name,
+                        'measurement_unit_alt': entry.measurement_unit_alt_ref.name if entry.measurement_unit_alt_ref else ''
                     }
                     for entry in entries
                 ]
@@ -289,16 +367,31 @@ class DatabaseManager:
         """Обновление записи в справочнике"""
         try:
             with self.SessionLocal() as db:
+                # Получаем или создаем записи в справочных таблицах
+                normalized_name = self._get_or_create(db, NormalizedName, 
+                    name=entry_data['normalized_name'])
+                gbz_name = self._get_or_create(db, GbzName, 
+                    name=entry_data['gbz_name'])
+                group_name = self._get_or_create(db, GroupName, 
+                    name=entry_data['group_name'])
+                measurement_unit = self._get_or_create(db, MeasurementUnit, 
+                    name=entry_data['measurement_unit'])
+                measurement_unit_alt = None
+                if entry_data.get('measurement_unit_alt'):
+                    measurement_unit_alt = self._get_or_create(db, MeasurementUnit, 
+                        name=entry_data['measurement_unit_alt'])
+
                 entry = db.query(Dictionary).filter_by(
                     unique_key=entry_data['unique_key']
                 ).first()
                 
                 if entry:
-                    entry.normalized_name = entry_data['normalized_name']
-                    entry.gbz_name = entry_data['gbz_name']
-                    entry.group_name = entry_data['group_name']
-                    entry.measurement_unit = entry_data['measurement_unit']
-                    entry.measurement_unit_alt = entry_data.get('measurement_unit_alt', '')
+                    # Обновляем связи
+                    entry.normalized_name_id = normalized_name.id
+                    entry.gbz_name_id = gbz_name.id
+                    entry.group_name_id = group_name.id
+                    entry.measurement_unit_id = measurement_unit.id
+                    entry.measurement_unit_alt_id = measurement_unit_alt.id if measurement_unit_alt else None
                     
                     # Обновляем связанные вариации
                     for variation in entry.variations:
