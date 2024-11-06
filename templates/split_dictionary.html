@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Обработка справочника{% endblock %}
+
+{% block content %}
+<a href="/" class="nav-link">← Назад на главную</a>
+<h1>Обработка справочника</h1>
+
+<div class="upload-card">
+    <form action="/process_dictionary" method="post" enctype="multipart/form-data" id="uploadForm">
+        <div class="file-upload">
+            <label for="fileInput" class="button">
+                <i class="fas fa-file-excel"></i>
+                <span id="fileNameDisplay">Выберите Excel файл справочника</span>
+                <input type="file"
+                       id="fileInput"
+                       name="file"
+                       accept=".xlsx,.xls"
+                       required
+                       style="display: none;"
+                       onchange="handleFileSelect(this)">
+            </label>
+        </div>
+    </form>
+
+    <div id="progressContainer" style="display: none;">
+        <div class="progress-bar">
+            <div class="progress-fill"></div>
+        </div>
+        <div class="progress-info">Обработка файла...</div>
+    </div>
+</div>
+
+<div id="resultContainer" class="result-container" style="display: none;">
+    <div class="table-container">
+        <table class="result-table">
+            <thead>
+                <tr>
+                    <th>Варианты написания</th>
+                    <th>Нормализованное название</th>
+                    <th>Название ГБЗ/ТБЗ</th>
+                    <th>Группа недр</th>
+                    <th>Ед. изм.</th>
+                    <th>Альт. ед. изм.</th>
+                </tr>
+            </thead>
+            <tbody id="resultTableBody">
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+    .upload-card {
+        background-color: white;
+        border-radius: var(--border-radius);
+        padding: 20px;
+        margin: 20px 0;
+        box-shadow: var(--box-shadow);
+    }
+
+    .progress-bar {
+        width: 100%;
+        height: 20px;
+        background-color: #f0f0f0;
+        border-radius: var(--border-radius);
+        overflow: hidden;
+        margin: 10px 0;
+    }
+
+    .progress-fill {
+        width: 0%;
+        height: 100%;
+        background-color: var(--secondary-color);
+        transition: width 0.3s ease;
+    }
+
+    .progress-info {
+        text-align: center;
+        margin: 10px 0;
+        color: var(--text-color);
+    }
+
+    .result-container {
+        margin-top: 20px;
+    }
+
+    .variants-cell {
+        max-width: 300px;
+        word-wrap: break-word;
+    }
+
+    .variants-list {
+        margin: 0;
+        padding-left: 20px;
+    }
+
+    .variants-list li {
+        margin: 2px 0;
+    }
+</style>
+
+<script>
+async function handleFileSelect(input) {
+    const fileName = input.files[0]?.name || 'Выберите Excel файл справочника';
+    document.getElementById('fileNameDisplay').textContent = fileName;
+
+    if (input.files[0]) {
+        const formData = new FormData(document.getElementById('uploadForm'));
+        
+        try {
+            const progressContainer = document.getElementById('progressContainer');
+            const progressFill = document.querySelector('.progress-fill');
+            const progressInfo = document.querySelector('.progress-info');
+            
+            progressContainer.style.display = 'block';
+            document.getElementById('resultContainer').style.display = 'none';
+
+            const response = await fetch('/process_dictionary', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                throw new Error('Ошибка при обработке файла');
+            }
+
+            const data = await response.json();
+            
+            // Обновляем прогресс бар
+            const progress = data.progress;
+            const percentage = Math.round((progress.current / progress.total) * 100);
+            progressFill.style.width = `${percentage}%`;
+            progressInfo.textContent = `Обработано ${progress.current} из ${progress.total} записей (${percentage}%)`;
+
+            // Отображаем результаты
+            displayResults(data.data);
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Произошла ошибка при обработке файла');
+        } finally {
+            document.getElementById('progressContainer').style.display = 'none';
+        }
+    }
+}
+
+function displayResults(data) {
+    const tbody = document.getElementById('resultTableBody');
+    tbody.innerHTML = '';
+
+    data.forEach(entry => {
+        const row = document.createElement('tr');
+        
+        // Создаем ячейку с вариантами
+        const variantsCell = document.createElement('td');
+        variantsCell.className = 'variants-cell';
+        const variantsList = document.createElement('ul');
+        variantsList.className = 'variants-list';
+        entry.variants.forEach(variant => {
+            const li = document.createElement('li');
+            li.textContent = variant;
+            variantsList.appendChild(li);
+        });
+        variantsCell.appendChild(variantsList);
+        row.appendChild(variantsCell);
+
+        // Добавляем остальные ячейки
+        [
+            entry.normalized_name,
+            entry.gbz_name,
+            entry.group_name,
+            entry.measurement_unit,
+            entry.measurement_unit_alt || '-'
+        ].forEach(text => {
+            const td = document.createElement('td');
+            td.textContent = text;
+            row.appendChild(td);
+        });
+
+        tbody.appendChild(row);
+    });
+
+    document.getElementById('resultContainer').style.display = 'block';
+}
+</script>
+{% endblock %} 

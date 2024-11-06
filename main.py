@@ -21,6 +21,7 @@ import uuid
 from functools import lru_cache, wraps
 from time import time
 from database import DatabaseManager
+from split_dictionary import DictionarySplitter
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -158,107 +159,143 @@ async def upload_form(request: Request):
 @app.post("/process_file", tags=["File Processing"])
 async def process_file(file: UploadFile = File(...)):
     try:
-        # Добавляем таймаут для операции чтения файла
+        # Создаем временную директорию для файла
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file.filename)
 
-        # Читаем файл с таймаутом
-        async with asyncio.timeout(30):  # 30 секунд таймаут
-            with open(input_path, 'wb') as buffer:
-                shutil.copyfileobj(file.file, buffer)
+        # Сохраняем файл
+        with open(input_path, 'wb') as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
+        # Читаем файл для подсчета записей
         df = pd.read_excel(input_path, usecols=[0])
         total_rows = len(df)
+        minerals = df.iloc[:, 0].tolist()
 
+        # Создаем ID процесса и инициализируем прогресс
         processing_id = str(uuid.uuid4())
-        processing_tasks[processing_id] = ProcessingStatus(total_rows)
+        processing_tasks[processing_id] = {
+            'current': 0,
+            'total': total_rows,
+            'status': 'processing',
+            'results': [],
+            'temp_dir': temp_dir,
+            'input_path': input_path
+        }
 
-        # Запускаем с обраоткой ошибок
-        task = asyncio.create_task(process_file_background(processing_id, input_path, temp_dir))
+        # Запускаем обработку в фоновом режиме
+        task = asyncio.create_task(process_file_background(processing_id))
         task.add_done_callback(lambda t: logging.error(f"Task failed: {t.exception()}") if t.exception() else None)
 
-        return {"processing_id": processing_id}
+        return {
+            "processing_id": processing_id,
+            "total_records": total_rows
+        }
 
-    except asyncio.TimeoutError:
-        logging.error("Timeout while processing file")
-        raise HTTPException(status_code=504, detail="Processing timeout")
     except Exception as e:
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
         logging.error(f"Error processing file: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-async def process_file_background(processing_id: str, input_path: str, temp_dir: str):
+async def process_file_background(processing_id: str):
+    """Фоновая обработка файла"""
+    temp_dir = None
     try:
+        task_data = processing_tasks[processing_id]
+        temp_dir = task_data['temp_dir']
+        input_path = task_data['input_path']
+
         classifier = get_classifier()
-        timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
-        output_filename = f"classified_{timestamp}_{os.path.basename(input_path)}"
-        output_path = results_dir / output_filename
-
-        logging.debug(f"Starting background processing for ID: {processing_id}")
-
-        # Читаем данные
         df_input = pd.read_excel(input_path, usecols=[0])
         minerals = df_input.iloc[:, 0].tolist()
-        total = len(minerals)
-        logging.debug(f"Total minerals to process: {total}")
 
-        # Обновляем общее количество
-        processing_tasks[processing_id].total = total
+        results = []
+        stats = {
+            'total': len(minerals),
+            'processed': 0,
+            'classified': 0,
+            'unknown': 0
+        }
 
-        # Обрабатываем минералы с обновлением прогресса
-        all_results = []
         for i, mineral in enumerate(minerals):
             if pd.notna(mineral):
-                # Передаем управление каждые 5 операций
-                if i % 5 == 0:
-                    await asyncio.sleep(0.01)
-
                 result = classifier.classify_mineral(str(mineral))
                 result['original_name'] = mineral
-                all_results.append(result)
+                results.append(result)
 
-            processing_tasks[processing_id].processed = i + 1
+                # Обновляем статистику
+                stats['processed'] += 1
+                if result['normalized_name_for_display'] != 'неизвестно':
+                    stats['classified'] += 1
+                else:
+                    stats['unknown'] += 1
 
-            # Логируем прогресс
-            if (i + 1) % 10 == 0:
-                logging.debug(f"Processed {i + 1}/{total} minerals")
+                # Обновляем прогресс и статистику
+                processing_tasks[processing_id].update({
+                    'current': i + 1,
+                    'results': results,
+                    'status': 'processing',
+                    'stats': stats
+                })
 
-        # Сохраняем результаты
-        df_results = pd.DataFrame(all_results)
+                # Даем возможность другим задачам выполниться
+                if i % 10 == 0:
+                    await asyncio.sleep(0.1)
+
+        # Сохраняем результаты в Excel
+        df_results = pd.DataFrame(results)
         columns_order = [
             'original_name', 'normalized_name_for_display', 'pi_name_gbz_tbz',
             'pi_group_is_nedra', 'pi_measurement_unit', 'pi_measurement_unit_alternative'
         ]
         df_results = df_results[columns_order]
+        
+        output_filename = f"classified_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        output_path = results_dir / output_filename
         df_results.to_excel(output_path, index=False)
 
-        # Обновляем статус и путь к файлу
-        processing_tasks[processing_id].status = 'completed'
-        processing_tasks[processing_id].output_file = output_path
-        logging.debug(f"Processing completed for ID: {processing_id}")
+        processing_tasks[processing_id].update({
+            'status': 'completed',
+            'output_file': output_path,
+            'stats': stats
+        })
 
     except Exception as e:
         logging.error(f"Error in background processing: {str(e)}")
-        processing_tasks[processing_id].status = 'error'
+        processing_tasks[processing_id]['status'] = 'error'
     finally:
-        # Очищаем временные файлы
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-@app.get("/progress/{processing_id}", tags=["File Processing"])
+@app.get("/progress/{processing_id}")
 async def get_progress(processing_id: str):
+    """Получение прогресса обработки"""
     if processing_id not in processing_tasks:
-        logging.error(f"Processing task not found: {processing_id}")
         raise HTTPException(status_code=404, detail="Processing task not found")
 
     task = processing_tasks[processing_id]
-    progress_data = {
-        "total": task.total,
-        "processed": task.processed,
-        "status": task.status
+    
+    # Вычисляем процент выполнения
+    percent = int((task['current'] / task['total']) * 100) if task['total'] > 0 else 0
+    
+    response_data = {
+        "total": task['total'],
+        "processed": task['current'],
+        "status": task['status'],
+        "progress": percent,
     }
-    logging.debug(f"Progress for {processing_id}: {progress_data}")
-    return progress_data
+
+    # Добавляем статистику, если она есть
+    if 'stats' in task:
+        response_data['stats'] = task['stats']
+
+    # Добавляем результаты, если они есть и обработка завершена
+    if task['status'] == 'completed' and 'results' in task:
+        response_data['results'] = task['results']
+
+    return response_data
 
 
 @app.get("/download/{processing_id}", tags=["File Processing"])
@@ -267,13 +304,16 @@ async def download_result(processing_id: str):
         raise HTTPException(status_code=404, detail="Processing task not found")
 
     task = processing_tasks[processing_id]
-    if task.status != 'completed':
+    if task['status'] != 'completed':
         raise HTTPException(status_code=400, detail="Processing not completed")
 
+    if 'output_file' not in task:
+        raise HTTPException(status_code=404, detail="Output file not found")
+
     return FileResponse(
-        path=str(task.output_file),
+        path=str(task['output_file']),
         media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        filename=os.path.basename(task.output_file)
+        filename=os.path.basename(task['output_file'])
     )
 
 
@@ -355,6 +395,7 @@ def timed_lru_cache(seconds: int, maxsize: int = 128):
             return func(*args, **kwargs)
 
         wrapped_func.cache_info = func.cache_info
+        wrapped_func.cache_info = func.cache_info
         wrapped_func.cache_clear = func.cache_clear
         return wrapped_func
 
@@ -390,7 +431,7 @@ async def show_unclassified(request: Request):
 async def add_classification(classification: ClassificationInput):
     """Добавляет новую классификацию"""
     try:
-        # Проверяем обязательные поля
+        # роверяем обязательные поля
         if not all([
             classification.term,
             classification.normalized_name,
@@ -578,7 +619,7 @@ async def upload_file(file: UploadFile = File(...)):
 
 @app.get("/upload/progress/{process_id}")
 async def get_progress(process_id: str):
-    """Получение прогресса обработки"""
+    """Полчение прогресса обработки"""
     if process_id in processing_progress:
         progress = processing_progress[process_id]
         percent = int((progress['current'] / progress['total']) * 100) if progress['total'] > 0 else 0
@@ -672,6 +713,68 @@ async def classify_mineral(request: Request):
             status_code=500,
             detail=f"Ошибка при классификации: {str(e)}"
         )
+
+@app.get("/split_dictionary", response_class=HTMLResponse, tags=["Dictionary Processing"])
+async def show_split_dictionary(request: Request):
+    """Показывает страницу обработки справочника"""
+    return templates.TemplateResponse("split_dictionary.html", {"request": request})
+
+@app.post("/process_dictionary", tags=["Dictionary Processing"])
+async def process_dictionary(file: UploadFile = File(...)):
+    """Обрабатывает загруженный файл справочника"""
+    try:
+        # Создаем временную директорию для файла
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = os.path.join(temp_dir, file.filename)
+            
+            # Сохраняем загруженный файл
+            with open(temp_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            
+            # Читаем файл для подсчета общего количества записей
+            df = pd.read_excel(temp_path, header=3)
+            total_rows = len(df)
+            
+            # Обрабатываем файл
+            splitter = DictionarySplitter(temp_path)
+            
+            # Создаем объект для хранения прогресса
+            progress = {"current": 0, "total": total_rows}
+            
+            # Добавляем callback для отслеживания прогресса
+            def progress_callback(current):
+                progress["current"] = current
+            
+            # Передаем callback в метод process_file
+            splitter.process_file(progress_callback=progress_callback)
+            
+            # Формируем результат
+            result = {
+                "progress": progress,
+                "data": []
+            }
+            
+            for unique_key, data in splitter.normalized_dict.items():
+                variants = [
+                    variant for variant, key in splitter.variations_dict.items()
+                    if key == unique_key
+                ]
+                
+                entry = {
+                    'variants': sorted(variants),
+                    'normalized_name': data['normalized_name'],
+                    'gbz_name': data['gbz_name'],
+                    'group_name': data['group_name'],
+                    'measurement_unit': data['measurement_unit'],
+                    'measurement_unit_alt': data['measurement_unit_alt']
+                }
+                result["data"].append(entry)
+            
+            return result
+            
+    except Exception as e:
+        logging.error(f"Error processing dictionary file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     try:

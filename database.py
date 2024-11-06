@@ -154,7 +154,7 @@ class DatabaseManager:
             db.close()
 
     def add_dictionary_entry(self, entry_data: Dict) -> Optional[Dictionary]:
-        """Добавление или обнов��ение записи в основном словаре"""
+        """Добавление или обновение записи в основном словаре"""
         try:
             with self.SessionLocal() as db:
                 # Получаем или создаем записи в справочных таблицах
@@ -177,7 +177,7 @@ class DatabaseManager:
                 ).first()
                 
                 if existing_entry:
-                    # Обновляем существующую запись
+                    # Обновляем существющую запись
                     existing_entry.normalized_name_id = normalized_name.id
                     existing_entry.gbz_name_id = gbz_name.id
                     existing_entry.group_name_id = group_name.id
@@ -368,20 +368,20 @@ class DatabaseManager:
         try:
             with self.SessionLocal() as db:
                 # Получаем или создаем записи в справочных таблицах
-                normalized_name = self._get_or_create(db, NormalizedName, 
+                normalized_name = self._get_or_create(db, self.NormalizedName, 
                     name=entry_data['normalized_name'])
-                gbz_name = self._get_or_create(db, GbzName, 
+                gbz_name = self._get_or_create(db, self.GbzName, 
                     name=entry_data['gbz_name'])
-                group_name = self._get_or_create(db, GroupName, 
+                group_name = self._get_or_create(db, self.GroupName, 
                     name=entry_data['group_name'])
-                measurement_unit = self._get_or_create(db, MeasurementUnit, 
+                measurement_unit = self._get_or_create(db, self.MeasurementUnit, 
                     name=entry_data['measurement_unit'])
                 measurement_unit_alt = None
                 if entry_data.get('measurement_unit_alt'):
-                    measurement_unit_alt = self._get_or_create(db, MeasurementUnit, 
+                    measurement_unit_alt = self._get_or_create(db, self.MeasurementUnit, 
                         name=entry_data['measurement_unit_alt'])
 
-                entry = db.query(Dictionary).filter_by(
+                entry = db.query(self.Dictionary).filter_by(
                     unique_key=entry_data['unique_key']
                 ).first()
                 
@@ -484,3 +484,21 @@ class DatabaseManager:
         except Exception as e:
             logging.error(f"Error removing all unclassified terms: {e}")
             return False
+
+    def get_all_terms(self) -> List[str]:
+        """Получает все термины из базы данных"""
+        try:
+            with self.SessionLocal() as session:
+                # Получаем термины из таблицы вариаций
+                variations = session.query(Variation.variant).distinct().all()
+                terms = [row[0] for row in variations]
+                
+                # Получаем также нормализованные названия
+                normalized = session.query(NormalizedName.name).distinct().all()
+                terms.extend([row[0] for row in normalized])
+                
+                # Убираем дубликаты и возвращаем
+                return list(set(terms))
+        except Exception as e:
+            logging.error(f"Error getting all terms: {str(e)}")
+            return []

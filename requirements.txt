@@ -9,7 +9,7 @@ jinja2>=3.0.1
 
 # Работа с данными
 pandas>=1.3.0
-openpyxl>=3.0.7  # для работы с Excel
+openpyxl>=3.0.7
 numpy>=1.24.3
 
 # Валидация данных
@@ -25,3 +25,6 @@ psycopg2-binary>=2.9.0
 
 # Логирование
 python-json-logger>=2.0.2
+
+# Нечеткий поиск (используем rapidfuzz вместо fuzzywuzzy)
+rapidfuzz>=3.0.0

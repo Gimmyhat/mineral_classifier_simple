@@ -22,7 +22,7 @@ class DictionarySplitter:
             'строительные камни': 'Камни строительные',
             'силикатные изделия': 'Пески для бетона и силикатных изделий',
             'наполнители бетона': 'Пески для бетона и силикатных изделий',
-            'строиельные материалы': 'Песчано-гравийные материалы'
+            'строительные материалы': 'Песчано-гравийные материалы'
         }
 
         # Стоп-слова остаются те же...
@@ -58,7 +58,7 @@ class DictionarySplitter:
         }
         return priority_map.get(marker, 0)
 
-    def process_file(self):
+    def process_file(self, progress_callback=None):
         """Обработка файла с сохранением всех уникальных комбинаций"""
         df = pd.read_excel(
             self.input_file,
@@ -72,12 +72,16 @@ class DictionarySplitter:
         ]
 
         df = df.fillna('')
+        total_rows = len(df)
 
         # Создаем словарь для хранения базовых вариантов и их приоритетов
         base_variants = {}
 
         # Первый проход: собираем все варианты и их приоритеты
-        for _, row in df.iterrows():
+        for index, row in df.iterrows():
+            if progress_callback:
+                progress_callback(index + 1)
+                
             variant_text = row['pi_variants'].lower().strip()
             normalized_name = row['normalized_name_for_display'].lower().strip()
             gbz_name = row['pi_name_gbz_tbz'].strip()

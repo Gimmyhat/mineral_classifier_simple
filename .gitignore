@@ -1,28 +1,25 @@
 # Python
 __pycache__/
-*.py[cod]
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
 env/
 venv/
 .env
 
-# Данные
-data/
-results/
-logs/
+# Logs
+*.log
 
-# Временные файлы
-*.tmp
-*.bak
-deployment_package/
-deployment_package.zip
+# Project specific
+results/
+static/
+dump.rdb
 
 # IDE
 .vscode/
 .idea/
 
-# Python cache
-temp/
-*.pyc
-
+# Temporary files
+*.tmp
+*.temp

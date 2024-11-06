@@ -3,12 +3,11 @@
 {% block title %}Upload Excel File{% endblock %}
 
 {% block content %}
-<a href="/" class="nav-link">← Назад на главную</a>
-<h1>Загрузка Excel файла для классификации</h1>
-
-<div class="upload-card">
-    <form action="/process_file" method="post" enctype="multipart/form-data" id="uploadForm">
-        <div class="file-upload">
+<div class="header-container">
+    <a href="/" class="nav-link">← Назад на главную</a>
+    <div class="header-content">
+        <h1>Загрузка Excel файла для классификации</h1>
+        <form action="/process_file" method="post" enctype="multipart/form-data" id="uploadForm" class="inline-form">
             <label for="fileInput" class="button">
                 <i class="fas fa-file-excel"></i>
                 <span id="fileNameDisplay">Выберите Excel файл</span>
@@ -20,181 +19,303 @@
                        style="display: none;"
                        onchange="handleFileSelect(this)">
             </label>
-        </div>
-    </form>
-
-    <div id="progressContainer" style="display: none;">
-        <div class="upload-progress-bar">
-            <div class="upload-progress-fill"></div>
-        </div>
-        <div class="upload-progress-info">
-            <span id="progressText">0%</span>
-            <span id="progressDetails">Обработано 0 из 0 записей</span>
-        </div>
-        <div id="loadingMessage" class="upload-success-message">Обработка файла...</div>
+        </form>
     </div>
+</div>
 
+<div class="compact-info-container">
+    <div id="progressContainer" style="display: none;" class="progress-section">
+        <div class="progress-wrapper">
+            <div class="upload-progress-bar">
+                <div class="upload-progress-fill"></div>
+            </div>
+            <div class="upload-progress-info">
+                <span id="progressText">0%</span>
+                <span id="progressDetails">Обработано 0 из 0 записей</span>
+            </div>
+            <div id="loadingMessage" class="upload-success-message"></div>
+        </div>
+        <div id="statsContainer" class="stats-grid" style="display: none;">
+            <div class="stat-item">
+                <span class="stat-label">Всего:</span>
+                <span class="stat-value" id="statTotal">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Классифицировано:</span>
+                <span class="stat-value success" id="statClassified">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Не классифицировано:</span>
+                <span class="stat-value error" id="statUnknown">0</span>
+            </div>
+        </div>
+    </div>
     <div id="errorMessage" class="upload-error-message" style="display: none;"></div>
 </div>
 
-<div class="upload-card">
-    <h2>Инструкция</h2>
-    <ol>
-        <li>Подготовьте Excel файл со списком минералов в первой колонке</li>
-        <li>Нажмите на кнопку выше и выберите подготовленный файл</li>
-        <li>Файл будет автоматически загружен и обработан</li>
-        <li>После обработки вы получите новый Excel файл с результатами классификации</li>
-    </ol>
+<div id="previewContainer" class="preview-container" style="display: none;">
+    <div class="preview-header">
+        <div class="filters-panel">
+            <div class="filter-group">
+                <input type="text" id="filterOriginal" placeholder="Фильтр по исходному названию" class="filter-input">
+                <input type="text" id="filterNormalized" placeholder="Фильтр по нормализованному" class="filter-input">
+                <input type="text" id="filterGbz" placeholder="Фильтр по ГБЗ/ТБЗ" class="filter-input">
+                <input type="text" id="filterGroup" placeholder="Фильтр по группе" class="filter-input">
+                <input type="text" id="filterUnit" placeholder="Фильтр по ед. изм." class="filter-input">
+            </div>
+            <div class="filter-actions">
+                <button onclick="clearFilters()" class="button clear-filters-btn">
+                    <i class="fas fa-times"></i>
+                    Очистить фильтры
+                </button>
+                <button id="downloadButton" class="button download-btn" onclick="downloadResults()">
+                    <i class="fas fa-download"></i>
+                    Скачать результаты
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-container">
+        <table class="result-table">
+            <thead>
+                <tr>
+                    <th>Исходное название</th>
+                    <th>Нормализованное название</th>
+                    <th>Название ГБЗ/ТБЗ</th>
+                    <th>Группа недр</th>
+                    <th>Ед. изм.</th>
+                    <th>Альт. ед. изм.</th>
+                </tr>
+            </thead>
+            <tbody id="previewTableBody">
+            </tbody>
+        </table>
+    </div>
 </div>
 
 <style>
-    .upload-card {
+    .compact-info-container {
         background-color: white;
         border-radius: var(--border-radius);
-        padding: 20px;
-        margin: 20px 0;
+        padding: 10px;
+        margin: 10px 0;
         box-shadow: var(--box-shadow);
     }
 
-    .file-upload {
-        text-align: center;
-        margin: 20px 0;
-    }
-
-    .button {
-        display: inline-flex;
+    .progress-section {
+        display: flex;
+        justify-content: space-between;
         align-items: center;
-        gap: 10px;
-        padding: 12px 24px;
-        background-color: var(--primary-color);
-        color: white;
-        border-radius: var(--border-radius);
-        cursor: pointer;
-        transition: all 0.3s ease;
-        border: none;
-        font-size: 1rem;
-        font-weight: 500;
+        gap: 20px;
     }
 
-    .button:hover {
-        background-color: var(--primary-color-dark);
-        transform: translateY(-2px);
+    .progress-wrapper {
+        flex: 2;
+    }
+
+    .stats-grid {
+        flex: 1;
+        display: flex;
+        gap: 15px;
     }
 
     .upload-progress-bar {
         width: 100%;
-        height: 20px;
+        height: 8px;
         background-color: #f0f0f0;
-        border-radius: var(--border-radius);
+        border-radius: 5px;
         overflow: hidden;
-        margin: 10px auto;
-    }
-
-    .upload-progress-fill {
-        width: 0%;
-        height: 100%;
-        background-color: var(--secondary-color);
-        transition: width 0.3s ease;
+        margin: 5px 0;
     }
 
     .upload-progress-info {
         display: flex;
-        justify-content: center;
-        gap: 20px;
-        margin: 10px 0;
-        color: var(--text-color);
+        gap: 15px;
         font-size: 0.9rem;
-        text-align: center;
+        color: #666;
+        margin-top: 5px;
     }
 
-    #progressText {
+    .stat-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 0.9rem;
+    }
+
+    .stat-label {
+        color: #666;
+    }
+
+    .stat-value {
         font-weight: bold;
+        color: var(--primary-color);
     }
 
-    .upload-success-message {
-        color: #27ae60;
-        margin: 10px 0;
-        font-weight: 500;
+    .stat-value.success {
+        color: #28a745;
     }
 
-    .upload-error-message {
-        color: #e74c3c;
-        margin: 10px 0;
-        font-weight: 500;
+    .stat-value.error {
+        color: #dc3545;
     }
 
-    .progress-container {
-        width: 60%;
-        margin: 20px auto;
-        text-align: center;
+    .preview-container {
+        background-color: white;
+        border-radius: var(--border-radius);
+        padding: 15px;
+        margin-top: 10px;
+        box-shadow: var(--box-shadow);
+    }
+
+    .filters-panel {
+        margin-bottom: 15px;
+        padding: 15px;
+        background-color: #f8f9fa;
+        border-radius: var(--border-radius);
+        padding-right: 20px;
+        box-sizing: border-box;
+        width: 100%;
+    }
+
+    .filter-group {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 10px;
+        margin-bottom: 10px;
+        box-sizing: border-box;
+        width: 100%;
+    }
+
+    .filter-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 10px;
+        padding-right: 5px;
+    }
+
+    .filter-input {
+        padding: 6px 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .filter-input:focus {
+        border-color: var(--primary-color);
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(44, 62, 80, 0.1);
+    }
+
+    .clear-filters-btn {
+        background-color: #6c757d;
+    }
+
+    .download-btn {
+        background-color: var(--primary-color);
+    }
+
+    .table-container {
+        max-height: calc(100vh - 300px);
+        overflow-y: auto;
     }
 
     @media (max-width: 768px) {
-        .progress-container {
-            width: 80%;
+        .progress-section {
+            flex-direction: column;
         }
+
+        .stats-grid {
+            flex-direction: column;
+        }
+
+        .filter-group {
+            grid-template-columns: 1fr;
+        }
+
+        .filter-actions {
+            flex-direction: column;
+            width: 100%;
+        }
+
+        .filter-actions button {
+            width: 100%;
+            justify-content: center;
+        }
+    }
+
+    .upload-success-message {
+        color: #28a745;
+        margin: 5px 0;
+        font-size: 0.9rem;
+    }
+
+    .upload-error-message {
+        color: #dc3545;
+        margin: 5px 0;
+        font-size: 0.9rem;
+    }
+
+    .upload-progress-fill {
+        width: 0;
+        height: 100%;
+        background-color: var(--primary-color);
+        transition: width 0.3s ease-in-out;
+        border-radius: 5px;
+    }
+
+    @keyframes progress-animation {
+        0% { background-position: 0 0; }
+        100% { background-position: 30px 0; }
+    }
+
+    .upload-progress-fill.processing {
+        background-image: linear-gradient(
+            45deg,
+            rgba(255, 255, 255, 0.15) 25%,
+            transparent 25%,
+            transparent 50%,
+            rgba(255, 255, 255, 0.15) 50%,
+            rgba(255, 255, 255, 0.15) 75%,
+            transparent 75%,
+            transparent
+        );
+        background-size: 30px 30px;
+        animation: progress-animation 1s linear infinite;
+    }
+
+    .hidden-row {
+        display: none;
+    }
+
+    .highlight {
+        background-color: yellow;
+        padding: 2px;
+        border-radius: 2px;
     }
 </style>
 
 <script>
 let processingId = null;
 let progressInterval = null;
-
-function updateProgress() {
-    if (!processingId) return;
-
-    fetch(`/progress/${processingId}`)
-        .then(response => response.json())
-        .then(data => {
-            console.log('Progress data:', data);
-
-            if (data.total > 0) {
-                const percent = Math.round((data.processed / data.total) * 100);
-                document.querySelector('.upload-progress-fill').style.width = `${percent}%`;
-                document.getElementById('progressText').textContent = `${percent}%`;
-                document.getElementById('progressDetails').textContent =
-                    `Обработано ${data.processed} из ${data.total} записей`;
-                document.getElementById('loadingMessage').textContent =
-                    `Обработка файла... ${percent}% завершено`;
-
-                if (data.status === 'completed') {
-                    clearInterval(progressInterval);
-                    document.getElementById('loadingMessage').textContent = 'Обработка завершена!';
-                    setTimeout(() => {
-                        window.location.href = `/download/${processingId}`;
-                        document.getElementById('progressContainer').style.display = 'none';
-                    }, 1000);
-                } else if (data.status === 'error') {
-                    clearInterval(progressInterval);
-                    document.getElementById('errorMessage').style.display = 'block';
-                    document.getElementById('errorMessage').textContent = 'Произошла ошибка при обработке файла';
-                    document.getElementById('progressContainer').style.display = 'none';
-                }
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching progress:', error);
-            document.getElementById('errorMessage').style.display = 'block';
-            document.getElementById('errorMessage').textContent = 'Ошибка при получении прогресса обработки';
-        });
-}
+let classificationResults = null;
 
 async function handleFileSelect(input) {
     const fileName = input.files[0]?.name || 'Выберите Excel файл';
     document.getElementById('fileNameDisplay').textContent = fileName;
 
     if (input.files[0]) {
-        document.querySelector('.upload-progress-fill').style.width = '0%';
-        document.getElementById('progressText').textContent = '0%';
-        document.getElementById('progressDetails').textContent = 'Подготовка к обработке...';
-        document.getElementById('loadingMessage').textContent = 'Загрузка файла...';
-        document.getElementById('progressContainer').style.display = 'block';
+        document.getElementById('progressContainer').style.display = 'none';
         document.getElementById('errorMessage').style.display = 'none';
+        document.getElementById('previewContainer').style.display = 'none';
 
         const formData = new FormData(document.getElementById('uploadForm'));
 
         try {
-            console.log('Sending file...');
             const response = await fetch('/process_file', {
                 method: 'POST',
                 body: formData
@@ -205,29 +326,208 @@ async function handleFileSelect(input) {
             }
 
             const data = await response.json();
-            console.log('Received processing ID:', data);
-
             processingId = data.processing_id;
 
-            if (progressInterval) {
-                clearInterval(progressInterval);
-            }
-
-            progressInterval = setInterval(updateProgress, 500);
+            // Показываем прогресс-бар после успешной загрузки файла
+            document.getElementById('progressContainer').style.display = 'block';
+            document.getElementById('progressText').textContent = '0%';
+            document.getElementById('progressDetails').textContent = 
+                `Обработано 0 из ${data.total_records} записей`;
+            document.getElementById('loadingMessage').textContent = 'Обработка записей...';
+            
+            startProgressTracking();
 
         } catch (error) {
             console.error('Upload error:', error);
-            document.getElementById('progressContainer').style.display = 'none';
             document.getElementById('errorMessage').style.display = 'block';
             document.getElementById('errorMessage').textContent = error.message;
         }
     }
 }
 
-window.onbeforeunload = function() {
+function startProgressTracking() {
     if (progressInterval) {
         clearInterval(progressInterval);
     }
-};
+
+    progressInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/progress/${processingId}`);
+            const data = await response.json();
+
+            // Обновляем прогресс-бар
+            const percent = data.progress || 0;
+            const progressFill = document.querySelector('.upload-progress-fill');
+            if (progressFill) {
+                progressFill.style.width = `${percent}%`;
+                progressFill.style.transition = 'width 0.3s ease-in-out';
+            }
+
+            // Обновляем текст прогресса
+            document.getElementById('progressText').textContent = `${percent}%`;
+            document.getElementById('progressDetails').textContent =
+                `Обработано ${data.processed} из ${data.total} записей`;
+
+            // Обновляем статистику
+            if (data.stats) {
+                document.getElementById('statsContainer').style.display = 'block';
+                document.getElementById('statTotal').textContent = data.stats.total;
+                document.getElementById('statClassified').textContent = data.stats.classified;
+                document.getElementById('statUnknown').textContent = data.stats.unknown;
+            }
+
+            // Проверяем статус
+            if (data.status === 'completed') {
+                clearInterval(progressInterval);
+                if (data.results && data.results.length > 0) {
+                    displayPreview(data.results);
+                }
+                document.getElementById('loadingMessage').textContent = 'Обработка завершена!';
+                document.getElementById('previewContainer').style.display = 'block';
+                
+                // Оставляем статистику видимой
+                document.getElementById('progressContainer').style.display = 'block';
+                // Скрываем только прогресс-бар и детали прогресса
+                document.querySelector('.progress-wrapper').style.display = 'none';
+            } else if (data.status === 'error') {
+                clearInterval(progressInterval);
+                document.getElementById('errorMessage').style.display = 'block';
+                document.getElementById('errorMessage').textContent = 'Произошла ошибка при обработке файла';
+                document.getElementById('progressContainer').style.display = 'none';
+            }
+        } catch (error) {
+            console.error('Error fetching progress:', error);
+            clearInterval(progressInterval);
+            document.getElementById('errorMessage').style.display = 'block';
+            document.getElementById('errorMessage').textContent = 'Ошибка при получении прогресса обработки';
+        }
+    }, 100);
+}
+
+function displayPreview(results) {
+    clearFilters();
+    const tbody = document.getElementById('previewTableBody');
+    tbody.innerHTML = '';
+
+    results.forEach(result => {
+        const row = document.createElement('tr');
+        
+        // Добавляем все ячейки
+        [
+            result.original_name,
+            result.normalized_name_for_display,
+            result.pi_name_gbz_tbz,
+            result.pi_group_is_nedra,
+            result.pi_measurement_unit,
+            result.pi_measurement_unit_alternative || '-'
+        ].forEach((text, index) => {
+            const td = document.createElement('td');
+            td.textContent = text;
+            if (index > 0 && text === 'неизвестно') {  // Не подсвечиваем original_name
+                td.className = 'unknown-value';
+            }
+            row.appendChild(td);
+        });
+
+        tbody.appendChild(row);
+    });
+
+    document.getElementById('previewContainer').style.display = 'block';
+}
+
+async function downloadResults() {
+    if (!processingId) {
+        alert('Идентификатор процесса не найден');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/download/${processingId}`);
+        if (!response.ok) {
+            throw new Error('Ошибка при скачивании файла');
+        }
+        
+        // Создаем ссылку для скачивания
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `classified_results.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    } catch (error) {
+        console.error('Download error:', error);
+        alert('Ошибка при скачивании результатов');
+    }
+}
+
+function applyFilters() {
+    const filters = {
+        original: document.getElementById('filterOriginal').value.toLowerCase(),
+        normalized: document.getElementById('filterNormalized').value.toLowerCase(),
+        gbz: document.getElementById('filterGbz').value.toLowerCase(),
+        group: document.getElementById('filterGroup').value.toLowerCase(),
+        unit: document.getElementById('filterUnit').value.toLowerCase()
+    };
+
+    const rows = document.querySelectorAll('#previewTableBody tr');
+    
+    rows.forEach(row => {
+        const cells = row.getElementsByTagName('td');
+        const shouldShow = (
+            cells[0].textContent.toLowerCase().includes(filters.original) &&
+            cells[1].textContent.toLowerCase().includes(filters.normalized) &&
+            cells[2].textContent.toLowerCase().includes(filters.gbz) &&
+            cells[3].textContent.toLowerCase().includes(filters.group) &&
+            cells[4].textContent.toLowerCase().includes(filters.unit)
+        );
+        
+        row.classList.toggle('hidden-row', !shouldShow);
+        
+        // Подсвечиваем найденный текст
+        if (shouldShow) {
+            highlightText(cells[0], filters.original);
+            highlightText(cells[1], filters.normalized);
+            highlightText(cells[2], filters.gbz);
+            highlightText(cells[3], filters.group);
+            highlightText(cells[4], filters.unit);
+        }
+    });
+}
+
+function highlightText(cell, filter) {
+    if (!filter) {
+        cell.innerHTML = cell.textContent;
+        return;
+    }
+    
+    const text = cell.textContent;
+    const regex = new RegExp(`(${filter})`, 'gi');
+    cell.innerHTML = text.replace(regex, '<span class="highlight">$1</span>');
+}
+
+function clearFilters() {
+    const filterInputs = document.querySelectorAll('.filter-input');
+    filterInputs.forEach(input => input.value = '');
+    
+    const rows = document.querySelectorAll('#previewTableBody tr');
+    rows.forEach(row => {
+        row.classList.remove('hidden-row');
+        // Убираем подсветку
+        const cells = row.getElementsByTagName('td');
+        Array.from(cells).forEach(cell => {
+            cell.innerHTML = cell.textContent;
+        });
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const filterInputs = document.querySelectorAll('.filter-input');
+    filterInputs.forEach(input => {
+        input.addEventListener('input', applyFilters);
+    });
+});
 </script>
 {% endblock %}

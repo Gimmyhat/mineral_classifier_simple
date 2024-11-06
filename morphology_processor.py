@@ -25,6 +25,12 @@ class MorphologyProcessor:
             'алюминийй': 'алюминий',
             'алюминий': 'алюминий',
             'пескок': 'песок',
+            
+            # Варианты написания минералов
+            'аргиллит': 'аргиллит',
+            'аргилит': 'аргиллит',
+            'аргилитовый': 'аргиллит',
+            'аргиллитовый': 'аргиллит',
         }
         
         # Словарь окончаний
@@ -68,28 +74,76 @@ class MorphologyProcessor:
         return normalized
 
     def get_word_forms(self, word: str) -> List[str]:
-        """Получение всех возможных форм слова"""
-        forms = set()
-        forms.add(word)
-        
-        # Добавляем известные формы из исключений
-        if word in self.normalization_exceptions:
-            base_form = self.normalization_exceptions[word]
-            forms.add(base_form)
-            # Добавляем все известные формы для этого базового слова
-            for exception, normalized in self.normalization_exceptions.items():
-                if normalized == base_form:
-                    forms.add(exception)
-        
-        # Получаем формы через морфологический анализатор
-        parses = self.morph.parse(word)
-        for parse in parses:
-            forms.add(parse.normal_form)
-            # Добавляем все возможные формы слова
-            for form in parse.lexeme:
-                forms.add(form.word)
+        """Получает все формы слова, включая единственное и множественное число"""
+        try:
+            forms = set()
+            # Нормализуем написание
+            normalized_word = self.normalize_spelling(word)
+            words = normalized_word.split()
+            
+            for single_word in words:
+                parsed = self.morph.parse(single_word)
+                if not parsed:
+                    continue
+                    
+                for p in parsed:
+                    # Добавляем начальную форму
+                    forms.add(p.normal_form)
+                    
+                    # Для существительных генерируем все формы
+                    if 'NOUN' in p.tag:
+                        # Все падежи в единственном числе
+                        for case in ['nomn', 'gent', 'datv', 'accs', 'ablt', 'loct']:
+                            form = p.inflect({'sing', case})
+                            if form:
+                                forms.add(form.word)
+                        
+                        # Все падежи во множественном числе
+                        for case in ['nomn', 'gent', 'datv', 'accs', 'ablt', 'loct']:
+                            form = p.inflect({'plur', case})
+                            if form:
+                                forms.add(form.word)
+                    
+                    # Для прилагательных генерируем согласованные формы
+                    elif 'ADJF' in p.tag:
+                        for gender in ['masc', 'femn', 'neut']:
+                            for case in ['nomn', 'gent', 'datv', 'accs', 'ablt', 'loct']:
+                                for number in ['sing', 'plur']:
+                                    form = p.inflect({gender, case, number})
+                                    if form:
+                                        forms.add(form.word)
+            
+            # Генерируем составные формы
+            if len(words) > 1:
+                single_forms = list(forms)
+                compound_forms = set()
                 
-        return list(forms)
+                # Создаем все возможные комбинации форм слов
+                for form1 in single_forms:
+                    for form2 in single_forms:
+                        if form1 != form2:
+                            compound_forms.add(f"{form1} {form2}")
+                            compound_forms.add(f"{form2} {form1}")
+                
+                forms.update(compound_forms)
+            
+            return list(forms)
+            
+        except Exception as e:
+            logging.error(f"Error in get_word_forms: {str(e)}")
+            return [word]
+            
+    def normalize(self, word: str) -> str:
+        """Нормализует слово (приводит к начальной форме)"""
+        try:
+            parsed = self.morph.parse(word)
+            if parsed:
+                # Берем самый вероятный разбор
+                return parsed[0].normal_form
+            return word
+        except Exception as e:
+            logging.error(f"Error in normalize: {str(e)}")
+            return word
 
     def is_valid_word(self, word: str) -> bool:
         """Проверка валидности слова"""
@@ -128,3 +182,16 @@ class MorphologyProcessor:
             components.append(word)
             
         return components 
+
+    def normalize_spelling(self, word: str) -> str:
+        """Нормализует написание слова с учетом известных вариаций"""
+        # Словарь известных вариаций написания
+        spelling_variations = {
+            'аргилит': 'аргиллит',
+            'агрилит': 'аргиллит',
+            'аргилид': 'аргиллит',
+            # Можно добавить другие известные вариации
+        }
+        
+        word = word.lower()
+        return spelling_variations.get(word, word)

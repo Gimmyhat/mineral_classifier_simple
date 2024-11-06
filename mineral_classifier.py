@@ -6,34 +6,16 @@ from text_cleaner import TextCleaner
 from morphology_processor import MorphologyProcessor
 import pandas as pd
 from interactive_learner import InteractiveLearner
+from rapidfuzz import fuzz, process
 
 class MineralClassifier:
     def __init__(self, file_path):
         try:
             self.db = DatabaseManager()
-            # Удалить эти строки:
-            # self.dictionary_splitter = DictionarySplitter(file_path)
-            
-            # Удалить проверку файлов словарей:
-            # dict_path = Path('data/dictionary.xlsx')
-            # var_path = Path('data/variations.xlsx')
-            
-            # if not dict_path.exists() or not var_path.exists():
-            #     self.dictionary_splitter.process_file()
-            #     self.dictionary_splitter.save_files()
-            # else:
-            #     self.dictionary_splitter.process_file()
-            
-            # Инициализируем обработчики
             self.text_cleaner = TextCleaner()
             self.morphology_processor = MorphologyProcessor()
-            
-            # Инициализируем BatchProcessor
             self.batch_processor = BatchProcessor(self)
-            
-            # Изменить лог:
             logging.debug("MineralClassifier initialized successfully")
-            
         except Exception as e:
             logging.error(f"Error initializing classifier: {str(e)}")
             raise
@@ -46,46 +28,195 @@ class MineralClassifier:
             # 1. Очищаем текст
             cleaned_text = self.text_cleaner.clean_text(mineral_name)
             
-            # 2. Извлекаем основной термин и контексты
-            main_term, contexts = self.text_cleaner.extract_context(cleaned_text)
+            # 2. Извлекаем контекст из полного термина
+            main_text = cleaned_text
+            context_part = ""
+            if '(' in cleaned_text and ')' in cleaned_text:
+                context_start = cleaned_text.find('(')
+                context_part = cleaned_text[context_start:]
+                main_text = cleaned_text[:context_start].strip()
+                logging.debug(f"Extracted context: {context_part} from main text: {main_text}")
             
-            # 3. Пробуем точное соответствие
-            direct_result = self.db.get_mapping(cleaned_text)
-            if direct_result:
-                logging.debug(f"Found direct match for: {cleaned_text}")
-                return direct_result
-            
-            # 4. Генерируем варианты для поиска
-            search_variants = self._generate_search_variants(main_term, contexts)
-            
-            # 5. Проверяем варианты
-            for variant in search_variants:
-                result = self.db.get_mapping(variant)
-                if result:
-                    logging.debug(f"Found match for variant: {variant}")
-                    return result
-            
-            # 6. Если не нашли, пробуем морфологический анализ
-            normalized_variants = self._generate_morphological_variants(main_term)
-            for variant in normalized_variants:
-                result = self.db.get_mapping(variant)
-                if result:
-                    logging.debug(f"Found match for normalized variant: {variant}")
-                    return result
-            
-            # 7. Если не удалось классифицировать, добавляем в неклассифицированные
-            logging.debug(f"No matches found for: {mineral_name}")
-            try:
-                self.db.add_unclassified_term(mineral_name)
-                logging.debug(f"Added '{mineral_name}' to unclassified terms")
-            except Exception as e:
-                logging.error(f"Error adding to unclassified terms: {e}")
+            # 3. Проверяем разделители в основном тексте
+            if "," in main_text or " и " in main_text:
+                terms = []
+                # Сначала разбиваем по запятой
+                parts = [part.strip() for part in main_text.split(',')]
                 
-            return self._get_unknown_result()
+                # Обрабатываем каждую часть на наличие союза "и"
+                for part in parts:
+                    if " и " in part:
+                        terms.extend([t.strip() for t in part.split(" и ")])
+                    else:
+                        terms.append(part)
+                
+                logging.debug(f"Split terms: {terms}")
+                
+                results = []
+                # Обрабатываем каждый термин с контекстом
+                for term in terms:
+                    # Добавляем контекст к термину
+                    full_term = f"{term} {context_part}".strip()
+                    logging.debug(f"Processing split term with context: {full_term}")
+                    
+                    # Пробуем прямое соответствие с контекстом
+                    direct_result = self.db.get_mapping(full_term)
+                    if direct_result:
+                        logging.debug(f"Found direct match for term with context: {full_term}")
+                        results.append(direct_result)
+                        continue
+                    
+                    # Пробуем без контекста
+                    direct_result = self.db.get_mapping(term)
+                    if direct_result:
+                        logging.debug(f"Found direct match for term: {term}")
+                        results.append(direct_result)
+                        continue
+                    
+                    # Если прямого соответствия нет, пробуем классифицировать термин отдельно
+                    term_result = self._classify_single_term(term, context_part)
+                    if term_result and term_result['normalized_name_for_display'] != 'неизвестно':
+                        logging.debug(f"Found classification for term: {term}")
+                        results.append(term_result)
+                
+                # Если нашли хотя бы один результат, возвращаем первый
+                if results:
+                    logging.debug(f"Returning first result from {len(results)} results")
+                    return results[0]
+                
+                # Если не нашли результатов для отдельных терминов,
+                # пробуем обработать весь текст как единый термин
+                logging.debug(f"Trying to process as single term: {main_text}")
+                return self._classify_single_term(main_text, context_part)
+            
+            # 4. Если нет разделителей, обрабатываем как единый термин
+            return self._classify_single_term(main_text, context_part)
             
         except Exception as e:
             logging.error(f"Error in classify_mineral: {str(e)}")
             return self._get_unknown_result()
+
+    def _classify_single_term(self, term: str, context: str = "") -> Dict[str, Any]:
+        """Классифицирует отдельный термин"""
+        try:
+            # Нормализуем написание термина
+            normalized_term = self.morphology_processor.normalize_spelling(term)
+            
+            # Сначала проверяем полный термин с контекстом
+            if context:
+                full_term = f"{normalized_term} {context}".strip()
+                direct_result = self.db.get_mapping(full_term)
+                if direct_result:
+                    logging.debug(f"Found direct match for full term with context: {full_term}")
+                    return direct_result
+            
+            # Проверяем нормализованный термин
+            direct_result = self.db.get_mapping(normalized_term)
+            if direct_result:
+                logging.debug(f"Found direct match for normalized term: {normalized_term}")
+                return direct_result
+                
+            # Обработка составных терминов
+            compound_terms = self._split_compound_terms(term)
+            if compound_terms:
+                logging.debug(f"Generated compound terms: {compound_terms}")
+                for sub_term in compound_terms:
+                    # Проверяем каждый подтермин с контекстом
+                    if context:
+                        full_sub_term = f"{sub_term} {context}".strip()
+                        result = self.db.get_mapping(full_sub_term)
+                        if result:
+                            logging.debug(f"Found match for compound term with context: {full_sub_term}")
+                            return result
+                    
+                    # Проверяем просто подтермин
+                    result = self.db.get_mapping(sub_term)
+                    if result:
+                        logging.debug(f"Found match for compound term: {sub_term}")
+                        return result
+            
+            # Получаем все морфологические формы
+            normalized_variants = self._generate_morphological_variants(term)
+            logging.debug(f"Generated morphological variants: {normalized_variants}")
+            
+            for variant in normalized_variants:
+                result = self.db.get_mapping(variant)
+                if result:
+                    logging.debug(f"Found match for morphological variant: {variant}")
+                    return result
+            
+            # Пробуем нечеткий поиск только если морфологический анализ не помог
+            try:
+                fuzzy_result = self._fuzzy_search(term)
+                if fuzzy_result:
+                    logging.debug(f"Found fuzzy match for term: {term}")
+                    return fuzzy_result
+            except Exception as e:
+                logging.error(f"Error in fuzzy search: {str(e)}")
+            
+            logging.debug(f"No matches found for term: {term}")
+            return self._get_unknown_result()
+            
+        except Exception as e:
+            logging.error(f"Error in _classify_single_term: {str(e)}")
+            return self._get_unknown_result()
+
+    def _split_compound_terms(self, term: str) -> List[str]:
+        """Разбивает составной термин на компоненты с учетом множественных комбинаций"""
+        results = set()
+        
+        # Разбиваем по всем возможным разделителям
+        separators = ['-', ' ']
+        parts = term
+        for sep in separators:
+            parts = ' '.join(parts.split(sep))
+        parts = [p.strip() for p in parts.split()]
+        
+        # Добавляем исходный термин
+        results.add(term)
+        
+        # Добавляем отдельные компоненты
+        results.update(parts)
+        
+        # Генерируем все возможные последовательные комбинации
+        for i in range(len(parts)):
+            for j in range(i + 2, len(parts) + 1):
+                # Комбинация через дефис
+                hyphen_combo = '-'.join(parts[i:j])
+                results.add(hyphen_combo)
+                
+                # Комбинация через пробел
+                space_combo = ' '.join(parts[i:j])
+                results.add(space_combo)
+        
+        # Генерируем специальные комбинации для материалов
+        if 'материал' in parts:
+            material_index = parts.index('материал')
+            prefix_parts = parts[:material_index]
+            
+            # Создаем комбинации для префиксной части
+            for i in range(len(prefix_parts)):
+                for j in range(i + 1, len(prefix_parts) + 1):
+                    current_parts = prefix_parts[i:j]
+                    # Добавляем варианты с "материал"
+                    hyphen_combo = f"{'-'.join(current_parts)}-материал"
+                    space_combo = f"{' '.join(current_parts)} материал"
+                    results.add(hyphen_combo)
+                    results.add(space_combo)
+        
+        # Добавляем специальные правила для известных шаблонов
+        known_patterns = {
+            'песчано': ['песок'],
+            'гравийно': ['гравий'],
+            'валунный': ['валуны'],
+            'щебеночный': ['щебень']
+        }
+        
+        for part in parts:
+            if part in known_patterns:
+                results.update(known_patterns[part])
+        
+        return list(results)
 
     def _generate_search_variants(self, main_term: str, contexts: List[str]) -> List[str]:
         """Генерирует варианты для поиска"""
@@ -129,7 +260,7 @@ class MineralClassifier:
         return self.text_cleaner.remove_duplicates(variants)
 
     def _get_unknown_result(self) -> Dict[str, str]:
-        """Возвращает стандартный результат для неизвестного значения"""
+        """Взвращает стандартный результат для неизвестного значения"""
         return {
             'normalized_name_for_display': 'неизвестно',
             'pi_name_gbz_tbz': 'неизвестно',
@@ -137,6 +268,57 @@ class MineralClassifier:
             'pi_measurement_unit': '',
             'pi_measurement_unit_alternative': ''
         }
+
+    def _fuzzy_search(self, term: str, min_ratio: int = 85) -> Dict[str, Any]:
+        """Выполняет нечеткий поиск по базе данных"""
+        try:
+            all_terms = self.db.get_all_terms()
+            if not all_terms:
+                return None
+                
+            # process.extractOne возвращает кортеж (match, score, index)
+            result = process.extractOne(
+                term.lower(),
+                all_terms,
+                scorer=fuzz.ratio,
+                score_cutoff=min_ratio
+            )
+            
+            if result:
+                best_match = result[0]  # Берем только совпадение, игнорируем score и index
+                logging.debug(f"Fuzzy match found: {best_match} for term: {term}")
+                return self.db.get_mapping(best_match)
+            return None
+        except Exception as e:
+            logging.error(f"Error in fuzzy search: {str(e)}")
+            return None
+
+    def _process_context(self, context: str) -> Set[str]:
+        """Обрабатывает контекстную информацию"""
+        contexts = set()
+        
+        # Удаляем скобки и разделяем по запятой
+        clean_context = context.replace('(', '').replace(')', '')
+        parts = [p.strip() for p in clean_context.split(',')]
+        
+        for part in parts:
+            # Добавляем оригинальный контекст
+            contexts.add(part)
+            
+            # Добавляем нормализованные варианты
+            normalized = self.morphology_processor.normalize(part)
+            if normalized:
+                contexts.add(normalized)
+                
+            # Обрабатываем составные контексты
+            if ' ' in part:
+                sub_parts = part.split()
+                for sub in sub_parts:
+                    normalized_sub = self.morphology_processor.normalize(sub)
+                    if normalized_sub:
+                        contexts.add(normalized_sub)
+        
+        return contexts
 
 class BatchProcessor:
     def __init__(self, classifier: MineralClassifier):
